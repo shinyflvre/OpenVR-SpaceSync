@@ -8,6 +8,7 @@
 #include "Version.h"
 
 #include <cmath>
+#include <cstdio>
 
 static double QpcSeconds(const LARGE_INTEGER& t)
 {
@@ -147,9 +148,11 @@ void ServerTrackedDeviceProvider::SetHmdTracker(const protocol::SetHmdTracker& c
 		frames.reset();
 		hmdFrame.reset();
 		residualDiag.reset();
+		yawBins.reset();
 		mount.reset();
 		refine.reset();
 		refinePrimed = false;
+		worldTilt = { 1, 0, 0, 0 };
 		{
 			std::lock_guard<std::mutex> lock(trackerSampleMutex);
 			trackerSample.valid = false;
@@ -183,6 +186,7 @@ void ServerTrackedDeviceProvider::SetHmdTracker(const protocol::SetHmdTracker& c
 				drift.estimator.translation = { 0, 0, 0 };
 				drift.rotation = { 1, 0, 0, 0 };
 				drift.translation = { 0, 0, 0 };
+				worldTilt = { 1, 0, 0, 0 };
 				drift.valid = true;
 				LOG("Follow mode without head tracker: static alignment from calibration, headset recenters are carried over");
 			}
@@ -223,12 +227,33 @@ void ServerTrackedDeviceProvider::SetOneEuro(const protocol::SetOneEuro& cmd)
 	if (headFilter.enabled && !cmd.headEnabled)
 		headFilter.reset();
 	headFilter.enabled = cmd.headEnabled;
+
+	double ds = cmd.deviceSmoothing;
+	if (ds < 0.0) ds = 0.0;
+	if (ds > 100.0) ds = 100.0;
+	double prev = deviceSmoothing.exchange(ds);
+	if (prev != ds)
+	{
+		double minCutoff = 12.0 * std::pow(1.0 / 30.0, ds / 100.0);
+		oneeuro::Params p = { minCutoff, 0.8, 1.0 };
+		for (auto& f : deviceFilters)
+		{
+			f.rotationFilter.params = p;
+			f.translationFilter.params = p;
+			f.reset();
+		}
+		LOG("Lighthouse device smoothing %s: %.0f %% (cutoff %.2f Hz)", ds >= 0.5 ? "enabled" : "disabled", ds, minCutoff);
+	}
 }
 
 void ServerTrackedDeviceProvider::UpdateDrift(const vr::HmdQuaternion_t& correctedRotation, const double(&correctedPosition)[3],
 	const vr::HmdQuaternion_t& rawRotation, const double(&rawPosition)[3], double confidence)
 {
-	vr::HmdQuaternion_t relation = quaternionNormalize(correctedRotation * quaternionConjugate(rawRotation));
+	vr::HmdQuaternion_t invTilt = quaternionConjugate(worldTilt);
+	vr::HmdQuaternion_t correctedRotationT = quaternionNormalize(invTilt * correctedRotation);
+	vr::HmdVector3d_t correctedPositionT = quaternionRotateVector(invTilt, correctedPosition);
+
+	vr::HmdQuaternion_t relation = quaternionNormalize(correctedRotationT * quaternionConjugate(rawRotation));
 	vr::HmdQuaternion_t instRot = quaternionProjectYaw(relation);
 
 	double dt = FilterStep(drift.lastUpdate, drift.valid);
@@ -240,9 +265,9 @@ void ServerTrackedDeviceProvider::UpdateDrift(const vr::HmdQuaternion_t& correct
 
 	auto& est = drift.estimator;
 	double yawBefore = est.valid ? est.yaw : 0.0;
-	bool snapped = est.update(quaternionYawRad(instRot), vecFromArray(correctedPosition), vecFromArray(rawPosition), rawRotation, slamScale, confidence, dt);
-	drift.rotation = est.rotation();
-	drift.translation = est.translation;
+	bool snapped = est.update(quaternionYawRad(instRot), correctedPositionT, vecFromArray(rawPosition), rawRotation, slamScale, confidence, dt);
+	drift.rotation = quaternionNormalize(worldTilt * est.rotation());
+	drift.translation = quaternionRotateVector(worldTilt, est.translation);
 	drift.valid = true;
 
 	if (snapped)
@@ -250,6 +275,8 @@ void ServerTrackedDeviceProvider::UpdateDrift(const vr::HmdQuaternion_t& correct
 		LOG("Drift jump compensated: yaw %.2f -> %.2f deg, translation delta %.1f cm, %d frames, sigma %.2f deg / %.1f mm",
 			yawBefore * 180.0 / POSE_PI, est.yaw * 180.0 / POSE_PI, vecNorm(est.lastJumpTranslation) * 100.0, est.lastJumpFrames,
 			est.sigmaYaw() * 180.0 / POSE_PI, est.sigmaTranslation() * 1000.0);
+		if (std::fabs(est.lastJumpYaw) > 0.05 || vecNorm(est.lastJumpTranslation) > 0.15)
+			clock.noteHmdDiscontinuity();
 		refine.shift(est.lastJumpYaw, est.lastJumpTranslation);
 		driftLog.yawDeg = quaternionYawDeg(drift.rotation);
 		driftLog.translation = drift.translation;
@@ -306,6 +333,7 @@ void ServerTrackedDeviceProvider::GetStatus(protocol::DriverStatus& status)
 	status.sigmaTranslationM = drift.estimator.sigmaTranslation();
 	status.calmSeconds = refine.weight();
 	status.refinementSolves = refine.applied;
+	status.refinementTranslationSolves = refine.appliedTranslation;
 
 	std::lock_guard<std::mutex> lock(effectiveMutex);
 	status.refinementValid = effectiveSharedValid && hmdTracker.enabled.load(std::memory_order_acquire);
@@ -328,6 +356,11 @@ void ServerTrackedDeviceProvider::ApplyDrift(vr::DriverPose_t& pose) const
 	pose.vecPosition[0] *= slamScale;
 	pose.vecPosition[1] *= slamScale;
 	pose.vecPosition[2] *= slamScale;
+	for (int i = 0; i < 3; i++)
+	{
+		pose.vecVelocity[i] *= slamScale;
+		pose.vecAcceleration[i] *= slamScale;
+	}
 
 	double scaledTranslation[3] = {
 		pose.vecWorldFromDriverTranslation[0] * slamScale,
@@ -353,6 +386,11 @@ void ServerTrackedDeviceProvider::ApplyInverseDrift(vr::DriverPose_t& pose) cons
 	pose.vecPosition[0] *= invScale;
 	pose.vecPosition[1] *= invScale;
 	pose.vecPosition[2] *= invScale;
+	for (int i = 0; i < 3; i++)
+	{
+		pose.vecVelocity[i] *= invScale;
+		pose.vecAcceleration[i] *= invScale;
+	}
 
 	double shifted[3] = {
 		(pose.vecWorldFromDriverTranslation[0] - drift.translation.v[0]) * invScale,
@@ -638,6 +676,23 @@ bool ServerTrackedDeviceProvider::HandleDevicePoseUpdated(uint32_t openVRID, vr:
 		// Follow mode: move the calibrated lighthouse device into the headset's SLAM space.
 		if (followSlam && drift.valid)
 			ApplyInverseDrift(pose);
+
+		if (deviceSmoothing.load(std::memory_order_relaxed) >= 0.5 && !(followSlam && openVRID == hmdTracker.trackerID))
+		{
+			auto& df = deviceFilters[openVRID];
+			if (!pose.poseIsValid || pose.result != vr::TrackingResult_Running_OK)
+				df.reset();
+			else
+			{
+				double fdt = FilterStep(df.lastUpdate, df.valid);
+				df.valid = true;
+				pose.qRotation = df.rotationFilter.filter(pose.qRotation, fdt);
+				vr::HmdVector3d_t smoothed = df.translationFilter.filter(vecFromArray(pose.vecPosition), fdt);
+				pose.vecPosition[0] = smoothed.v[0];
+				pose.vecPosition[1] = smoothed.v[1];
+				pose.vecPosition[2] = smoothed.v[2];
+			}
+		}
 	}
 
 	// Alignment is unaffected, it reads the raw sample stashed above.
@@ -706,8 +761,8 @@ bool ServerTrackedDeviceProvider::HandleDevicePoseUpdated(uint32_t openVRID, vr:
 						if (drift.valid)
 						{
 							drift.estimator.rebase(jumpYaw, jumpTranslation, SlamToCorrectedScale());
-							drift.rotation = drift.estimator.rotation();
-							drift.translation = drift.estimator.translation;
+							drift.rotation = quaternionNormalize(worldTilt * drift.estimator.rotation());
+							drift.translation = quaternionRotateVector(worldTilt, drift.estimator.translation);
 
 							// Its sums are built from raw poses, which are now in a different frame.
 							refine.clearSums();
@@ -839,16 +894,89 @@ bool ServerTrackedDeviceProvider::HandleDevicePoseUpdated(uint32_t openVRID, vr:
 							residualDiag.reset();
 							residualDiag.lastLog = nowSeconds;
 						}
+
+						if (confidence > 0.5)
+						{
+							vr::HmdVector3d_t predictedHead = vecAdd(quaternionRotateVector(drift.rotation, vecScale(vecFromArray(rawPosition), SlamToCorrectedScale())), drift.translation);
+							vr::HmdVector3d_t residualWorld = vecSub(headPositionVec, predictedHead);
+							if (vecNorm(residualWorld) < 0.2)
+							{
+								vr::HmdVector3d_t residualHead = quaternionRotateVector(quaternionConjugate(rawRotation), quaternionRotateVector(quaternionConjugate(drift.rotation), residualWorld));
+								double headYaw = quaternionYawRad(rawRotation);
+								int bin = (int)std::floor((headYaw + POSE_PI) / (2.0 * POSE_PI) * YawBins::Count);
+								if (bin < 0) bin = 0;
+								if (bin >= YawBins::Count) bin = YawBins::Count - 1;
+								for (int k = 0; k < 3; k++)
+								{
+									yawBins.sumWorld[bin][k] += residualWorld.v[k];
+									yawBins.sumHead[bin][k] += residualHead.v[k];
+									yawBins.sumMeas[bin][k] += residualWorld.v[k] + drift.translation.v[k];
+								}
+								yawBins.frames[bin]++;
+							}
+							if (nowSeconds - yawBins.lastLog > 60.0)
+							{
+								yawBins.lastLog = nowSeconds;
+								char line[1024];
+								int used = std::snprintf(line, sizeof line, "Head residual by yaw (world mm / head mm, n):");
+								for (int i = 0; i < YawBins::Count && used < (int)sizeof line - 1; i++)
+								{
+									int n = yawBins.frames[i];
+									if (n < 30)
+										used += std::snprintf(line + used, sizeof line - used, " [%d: -]", i * 45 - 180);
+									else
+										used += std::snprintf(line + used, sizeof line - used, " [%d: %.0f,%.0f,%.0f / %.0f,%.0f,%.0f n%d]", i * 45 - 180,
+											yawBins.sumWorld[i][0] / n * 1000.0, yawBins.sumWorld[i][1] / n * 1000.0, yawBins.sumWorld[i][2] / n * 1000.0,
+											yawBins.sumHead[i][0] / n * 1000.0, yawBins.sumHead[i][1] / n * 1000.0, yawBins.sumHead[i][2] / n * 1000.0, n);
+								}
+								LOG("%s", line);
+								double totalMeas[3] = { 0.0, 0.0, 0.0 };
+								long totalFrames = 0;
+								for (int i = 0; i < YawBins::Count; i++)
+								{
+									if (yawBins.frames[i] < 30) continue;
+									totalFrames += yawBins.frames[i];
+									for (int k = 0; k < 3; k++) totalMeas[k] += yawBins.sumMeas[i][k];
+								}
+								if (totalFrames > 0)
+								{
+									double meanMeas[3] = { totalMeas[0] / totalFrames, totalMeas[1] / totalFrames, totalMeas[2] / totalFrames };
+									used = std::snprintf(line, sizeof line, "Head measurement offset by yaw (mm vs mean):");
+									for (int i = 0; i < YawBins::Count && used < (int)sizeof line - 1; i++)
+									{
+										int n = yawBins.frames[i];
+										if (n < 30)
+											used += std::snprintf(line + used, sizeof line - used, " [%d: -]", i * 45 - 180);
+										else
+											used += std::snprintf(line + used, sizeof line - used, " [%d: %.0f,%.0f,%.0f]", i * 45 - 180,
+												(yawBins.sumMeas[i][0] / n - meanMeas[0]) * 1000.0,
+												(yawBins.sumMeas[i][1] / n - meanMeas[1]) * 1000.0,
+												(yawBins.sumMeas[i][2] / n - meanMeas[2]) * 1000.0);
+									}
+									LOG("%s", line);
+								}
+								yawBins.reset();
+							}
+						}
 					}
 
 					double dtRefine = FilterStep(refineLast, refinePrimed);
 					refinePrimed = true;
-					if (refine.weight() > 0.0 && (std::fabs(tauRotNow - refineTauRot) > 0.015 || std::fabs(tauPosNow - refineTauPos) > 0.015))
+					bool refineTauMoved = std::fabs(tauRotNow - refineTauRot) > 0.015 || std::fabs(tauPosNow - refineTauPos) > 0.015;
+					if (refine.weight() > 0.0 && refineTauMoved)
 					{
-						LOG("Mount refinement restarted, time alignment moved (rot %.1f -> %.1f ms, pos %.1f -> %.1f ms)",
-							refineTauRot * 1000.0, tauRotNow * 1000.0, refineTauPos * 1000.0, tauPosNow * 1000.0);
-						refine.clearSums();
+						if (refineTauMovedSince < 0.0)
+							refineTauMovedSince = nowSeconds;
+						else if (nowSeconds - refineTauMovedSince > 10.0)
+						{
+							LOG("Mount refinement restarted, time alignment moved (rot %.1f -> %.1f ms, pos %.1f -> %.1f ms)",
+								refineTauRot * 1000.0, tauRotNow * 1000.0, refineTauPos * 1000.0, tauPosNow * 1000.0);
+							refine.clearSums();
+							refineTauMovedSince = -1.0;
+						}
 					}
+					else
+						refineTauMovedSince = -1.0;
 					if (refine.weight() <= 0.0)
 					{
 						refineTauRot = tauRotNow;
@@ -856,12 +984,29 @@ bool ServerTrackedDeviceProvider::HandleDevicePoseUpdated(uint32_t openVRID, vr:
 					}
 					if (usable && drift.valid && confidence > 0.5 && clock.rot.primed && clock.pos.primed)
 					{
-						refine.add(headRotationBase, headPositionBase, rawRotation, vecFromArray(rawPosition), drift.estimator.yaw, SlamToCorrectedScaleBase(), confidence * dtRefine);
+						vr::HmdQuaternion_t invTiltRef = quaternionConjugate(worldTilt);
+						refine.add(quaternionNormalize(invTiltRef * headRotationBase), quaternionRotateVector(invTiltRef, headPositionBase), rawRotation, vecFromArray(rawPosition), drift.estimator.yaw, SlamToCorrectedScaleBase(), confidence * dtRefine);
 						align::MountRefiner::Delta applied;
 						if (refine.evaluate(applied))
 						{
 							double scaleBefore = SlamToCorrectedScale();
 							bool changed = vecNorm(applied.rotation) > 0.0 || vecNorm(applied.translation) > 0.0 || applied.scale != 0.0;
+							if (vecNorm(applied.tilt) > 0.0)
+							{
+								vr::HmdQuaternion_t stepQ = quaternionFromRotationVector(applied.tilt);
+								worldTilt = quaternionNormalize(worldTilt * stepQ);
+								drift.estimator.absorbTiltStep(stepQ);
+								drift.rotation = quaternionNormalize(worldTilt * drift.estimator.rotation());
+								drift.translation = quaternionRotateVector(worldTilt, drift.estimator.translation);
+								refine.clearSums();
+								vr::HmdVector3d_t tiltTotal = quaternionToRotationVector(worldTilt);
+								LOG("World tilt refined: step (%.3f, %.3f) deg, total (%.3f, %.3f) deg = %.3f deg, holdout rms %.3f -> %.3f deg, obs (%.2f, %.2f)",
+									applied.tilt.v[0] * 180.0 / POSE_PI, applied.tilt.v[2] * 180.0 / POSE_PI,
+									tiltTotal.v[0] * 180.0 / POSE_PI, tiltTotal.v[2] * 180.0 / POSE_PI,
+									quaternionAngleRad(worldTilt) * 180.0 / POSE_PI,
+									refine.lastTiltBefore * 180.0 / POSE_PI, refine.lastTiltAfter * 180.0 / POSE_PI,
+									refine.obsTilt[0], refine.obsTilt[1]);
+							}
 							if (changed)
 							{
 								drift.estimator.absorbRefinement(applied.rotation, applied.translation, applied.scale, rawRotation, vecFromArray(rawPosition), headRotationBase, SlamToCorrectedScaleBase(), scaleBefore);
@@ -877,18 +1022,25 @@ bool ServerTrackedDeviceProvider::HandleDevicePoseUpdated(uint32_t openVRID, vr:
 									vecNorm(refine.solvedRotation) * 180.0 / POSE_PI, vecNorm(refine.solvedTranslation) * 100.0);
 
 							if (refine.lastHadReference)
-								LOG("Mount refinement block %u: translation rms %.1f -> %.1f mm (%s), rotation %.2f -> %.2f deg (%s), applied total (%.1f, %.1f, %.1f) mm / (%.2f, %.2f, %.2f) deg / scale %+.3f %%, obs (%.2f, %.2f, %.2f | %.2f, %.2f, %.2f | %.2f m2)",
+								LOG("Mount refinement block %u: translation rms %.1f -> %.1f mm (%s), rotation %.2f -> %.2f deg (%s), solved (%.1f, %.1f, %.1f) mm / (%.2f, %.2f, %.2f) deg / %+.3f %%, applied total (%.1f, %.1f, %.1f) mm / (%.2f, %.2f, %.2f) deg / scale %+.3f %%, obs (%.2f, %.2f, %.2f | %.2f, %.2f, %.2f | %.2f m2), tilt cand (%.2f, %.2f) deg %s obs (%.2f, %.2f)",
 									refine.solves, refine.lastRmsBefore * 1000.0, refine.lastRmsAfter * 1000.0, refine.lastAcceptedTranslation ? "accepted" : "rejected",
 									refine.lastRotBefore * 180.0 / POSE_PI, refine.lastRotAfter * 180.0 / POSE_PI, refine.lastAcceptedRotation ? "accepted" : "rejected",
+									refine.solvedTranslation.v[0] * 1000.0, refine.solvedTranslation.v[1] * 1000.0, refine.solvedTranslation.v[2] * 1000.0,
+									refine.solvedRotation.v[0] * 180.0 / POSE_PI, refine.solvedRotation.v[1] * 180.0 / POSE_PI, refine.solvedRotation.v[2] * 180.0 / POSE_PI,
+									refine.solvedScale * 100.0,
 									refine.translation.v[0] * 1000.0, refine.translation.v[1] * 1000.0, refine.translation.v[2] * 1000.0,
 									refine.rotation.v[0] * 180.0 / POSE_PI, refine.rotation.v[1] * 180.0 / POSE_PI, refine.rotation.v[2] * 180.0 / POSE_PI,
 									refine.scale * 100.0,
 									refine.obsTranslation[0], refine.obsTranslation[1], refine.obsTranslation[2],
-									refine.obsRotation[0], refine.obsRotation[1], refine.obsRotation[2], refine.obsScale);
+									refine.obsRotation[0], refine.obsRotation[1], refine.obsRotation[2], refine.obsScale,
+									refine.solvedTilt.v[0] * 180.0 / POSE_PI, refine.solvedTilt.v[2] * 180.0 / POSE_PI,
+									refine.lastAcceptedTilt ? "applied" : "held",
+									refine.obsTilt[0], refine.obsTilt[1]);
 							else
-								LOG("Mount refinement block %u: reference block collected, obs (%.2f, %.2f, %.2f | %.2f, %.2f, %.2f | %.2f m2)", refine.solves,
+								LOG("Mount refinement block %u: reference block collected, obs (%.2f, %.2f, %.2f | %.2f, %.2f, %.2f | %.2f m2), tilt obs (%.2f, %.2f)", refine.solves,
 									refine.obsTranslation[0], refine.obsTranslation[1], refine.obsTranslation[2],
-									refine.obsRotation[0], refine.obsRotation[1], refine.obsRotation[2], refine.obsScale);
+									refine.obsRotation[0], refine.obsRotation[1], refine.obsRotation[2], refine.obsScale,
+									refine.obsTilt[0], refine.obsTilt[1]);
 						}
 					}
 				}

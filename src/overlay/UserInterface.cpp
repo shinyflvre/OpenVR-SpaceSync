@@ -4,6 +4,7 @@
 #include "UserInterface.h"
 #include "Calibration.h"
 #include "Configuration.h"
+#include "Lighthouse.h"
 #include "Theme.h"
 #include "Version.h"
 
@@ -281,8 +282,14 @@ UserInterface::WindowAction UserInterface::Render(bool runningInOverlay)
 			case Tab::Calibration:
 				if (editView_) RenderEdit(status); else RenderCalibration(status);
 				break;
+			case Tab::Preview:
+				RenderPreview();
+				break;
 			case Tab::Smoothing:
 				RenderSmoothing();
+				break;
+			case Tab::Lighthouse:
+				RenderLighthouse();
 				break;
 			case Tab::Settings:
 				RenderSettings();
@@ -363,7 +370,11 @@ void UserInterface::RenderTabs()
 	ImGui::SetCursorPos(ImVec2(px(24.0f + PageInset()), y0));
 	if (TabItem("Calibration", tab_ == Tab::Calibration)) tab_ = Tab::Calibration;
 	ImGui::SameLine();
+	if (TabItem("Tracking Preview", tab_ == Tab::Preview)) tab_ = Tab::Preview;
+	ImGui::SameLine();
 	if (TabItem("Smoothing", tab_ == Tab::Smoothing)) tab_ = Tab::Smoothing;
+	ImGui::SameLine();
+	if (TabItem("Lighthouse", tab_ == Tab::Lighthouse)) tab_ = Tab::Lighthouse;
 	ImGui::SameLine();
 	if (TabItem("Settings", tab_ == Tab::Settings)) tab_ = Tab::Settings;
 
@@ -636,28 +647,168 @@ namespace
 	}
 }
 
+void UserInterface::RenderPreview()
+{
+	ImVec2 avail = ImGui::GetContentRegionAvail();
+	float h = std::max(px(220.0f), avail.y);
+	preview_.Render(ImVec2(avail.x, h));
+}
+
+void UserInterface::RenderLighthouse()
+{
+	const float maxW = std::min(820.0f, PageDesignWidth());
+	lighthouse::EnsureScanning();
+
+	TextWrapped(F.regular, 13.0f, P.textMuted, maxW,
+		"Turn your base stations on, into standby, or to sleep without a Lighthouse headset. "
+		"Works with V2 base stations over Bluetooth LE.");
+	VSpace(18.0f);
+
+	if (!lighthouse::Available())
+	{
+		Text(F.regular, 13.0f, P.yellow, "Bluetooth LE is not available on this PC.");
+		VSpace(8.0f);
+		TextWrapped(F.regular, 12.5f, P.textDim, maxW, "A Bluetooth 4.0+ adapter is required to control base stations.");
+		return;
+	}
+
+	auto stations = lighthouse::Stations();
+
+	SectionHeader("Base Stations", maxW);
+	VSpace(10.0f);
+
+	if (stations.empty())
+	{
+		Text(F.regular, 12.5f, P.textDim, "Scanning for base stations...");
+		VSpace(8.0f);
+		TextWrapped(F.regular, 12.5f, P.textDim, maxW, "Make sure the stations have power and are within Bluetooth range.");
+		return;
+	}
+
+	char buf[128];
+	for (const auto& s : stations)
+	{
+		Text(F.semibold, 13.5f, P.textStrong, s.name.c_str());
+		ImGui::SameLine();
+		const char* stateText = "Unknown";
+		unsigned stateColor = P.textDim;
+		switch (s.state)
+		{
+		case lighthouse::Power::Awake: stateText = "Awake"; stateColor = P.green; break;
+		case lighthouse::Power::Standby: stateText = "Standby"; stateColor = P.yellow; break;
+		case lighthouse::Power::Sleep: stateText = "Sleeping"; stateColor = P.textMuted; break;
+		default: break;
+		}
+		Text(F.medium, 12.0f, stateColor, stateText);
+		ImGui::SameLine();
+		std::snprintf(buf, sizeof buf, "%d dBm", s.rssi);
+		Text(F.regular, 11.5f, P.textFooter, buf);
+		VSpace(8.0f);
+
+		ButtonOpts small;
+		small.fontSize = 12.5f;
+		small.padX = 14.0f;
+		small.padY = 7.0f;
+		small.enabled = !s.busy;
+
+		std::snprintf(buf, sizeof buf, "Wake##%llx", (unsigned long long)s.address);
+		if (Button(buf, small))
+			lighthouse::RequestPower(s.address, lighthouse::Power::Awake);
+		ImGui::SameLine();
+		std::snprintf(buf, sizeof buf, "Standby##%llx", (unsigned long long)s.address);
+		if (Button(buf, small))
+			lighthouse::RequestPower(s.address, lighthouse::Power::Standby);
+		ImGui::SameLine();
+		std::snprintf(buf, sizeof buf, "Sleep##%llx", (unsigned long long)s.address);
+		if (Button(buf, small))
+			lighthouse::RequestPower(s.address, lighthouse::Power::Sleep);
+		ImGui::SameLine();
+		std::snprintf(buf, sizeof buf, "Refresh##%llx", (unsigned long long)s.address);
+		ButtonOpts ghost = small;
+		ghost.kind = ButtonKind::Ghost;
+		if (Button(buf, ghost))
+			lighthouse::RequestRefresh(s.address);
+		if (s.busy)
+		{
+			ImGui::SameLine();
+			Text(F.regular, 12.0f, P.textDim, "working...");
+		}
+		if (!s.error.empty())
+		{
+			VSpace(4.0f);
+			Text(F.regular, 12.0f, P.danger, s.error.c_str());
+		}
+		VSpace(14.0f);
+		HLine(maxW);
+		VSpace(14.0f);
+	}
+
+	SectionHeader("All Stations", maxW);
+	VSpace(10.0f);
+	{
+		ButtonOpts opts;
+		opts.fontSize = 13.0f;
+		if (Button("Wake all"))
+			lighthouse::RequestPowerAll(lighthouse::Power::Awake);
+		ImGui::SameLine();
+		if (Button("Standby all"))
+			lighthouse::RequestPowerAll(lighthouse::Power::Standby);
+		ImGui::SameLine();
+		if (Button("Sleep all"))
+			lighthouse::RequestPowerAll(lighthouse::Power::Sleep);
+	}
+	VSpace(10.0f);
+	TextWrapped(F.regular, 12.0f, P.textDim, maxW,
+		"Sleeping or standby stations stop tracking immediately. Standby wakes up faster than sleep; older station firmware only supports sleep.");
+}
+
 void UserInterface::RenderSmoothing()
 {
 	const float maxW = std::min(820.0f, PageDesignWidth());
 	bool changed = false;
 
 	Text(F.regular, 13.0f, P.green, "NOTE: Changes here take effect instantly, no need to re-calibrate.");
-	VSpace(10.0f);
-	TextWrapped(F.regular, 13.0f, P.textMuted, maxW,
-		"These settings smooth out tracking so your view and devices look steady instead of shaky. "
-		"If something looks shaky, add more smoothing. If it feels laggy or floaty when you move, ease off.");
 	VSpace(18.0f);
 
-	changed |= CheckboxRow("Smooth headset tracker",
-		"Steadies what you see through the headset to reduce shaking. Adds a tiny bit of delay - if the view feels laggy when you move quickly, adjust the sliders below.",
-		&CalCtx.headFilterEnabled, maxW);
-	VSpace(18.0f);
+	SectionHeader("Lighthouse Trackers & Controllers", maxW);
+	VSpace(10.0f);
+	TextWrapped(F.regular, 12.5f, P.textMuted, maxW,
+		"Smooths all lighthouse devices (Vive/Tundra trackers, Index controllers) so they show less jittery movement, "
+		"for example for dancing or full body recordings. Recommended: 25% - smooth movement while keeping latency minimal. "
+		"The higher the percentage, the more latency you get on fast movement. 0% turns it off.");
+	VSpace(12.0f);
+	{
+		double value = CalCtx.lighthouseSmoothing;
+		char label[32];
+		std::snprintf(label, sizeof label, "%.0f %%", value);
+		if (Slider("##lighthouseSmoothing", &value, 0.0, 100.0, maxW - 90.0f))
+		{
+			CalCtx.lighthouseSmoothing = value;
+			changed = true;
+		}
+		ImGui::SameLine();
+		Text(F.medium, 13.0f, P.textStrong, label);
+	}
+	VSpace(24.0f);
 
 	SectionHeader("Headset Tracker", maxW);
+	VSpace(10.0f);
+	changed |= CheckboxRow("Smooth headset tracker",
+		"Steadies what you see through the headset to reduce shaking (HMD Driven mode only). Adds a tiny bit of delay - if the view feels laggy when you move quickly, adjust the sliders below.",
+		&CalCtx.headFilterEnabled, maxW);
+	VSpace(10.0f);
 	ParamSliders(CalCtx.headFilterParams, changed, maxW);
 
 	if (changed)
+	{
 		SendOneEuroParams();
+		smoothingDirty_ = true;
+	}
+	if (smoothingDirty_ && !ImGui::IsAnyMouseDown())
+	{
+		SaveProfile(CalCtx);
+		smoothingDirty_ = false;
+	}
 }
 
 void UserInterface::RenderSettings()

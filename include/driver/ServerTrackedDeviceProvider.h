@@ -136,10 +136,31 @@ private:
 		void reset() { yawNum = yawDen = posNum = posDen = 0.0; yawFrames = posFrames = 0; }
 	} residualDiag;
 
+	struct YawBins
+	{
+		static const int Count = 8;
+		double sumWorld[Count][3] = {};
+		double sumHead[Count][3] = {};
+		double sumMeas[Count][3] = {};
+		int frames[Count] = {};
+		double lastLog = 0.0;
+
+		void reset()
+		{
+			for (int i = 0; i < Count; i++)
+			{
+				frames[i] = 0;
+				for (int k = 0; k < 3; k++) { sumWorld[i][k] = 0.0; sumHead[i][k] = 0.0; sumMeas[i][k] = 0.0; }
+			}
+		}
+	} yawBins;
+
 	align::MountRefiner refine;
 	LARGE_INTEGER refineLast = {};
 	bool refinePrimed = false;
 	double refineLogTime = 0.0;
+	double refineTauMovedSince = -1.0;
+	vr::HmdQuaternion_t worldTilt = { 1, 0, 0, 0 };
 
 	struct EffectiveOffsets
 	{
@@ -254,6 +275,18 @@ private:
 
 		void reset() { valid = false; rotationFilter.reset(); translationFilter.reset(); }
 	} headFilter;
+
+	struct DeviceFilter
+	{
+		bool valid = false;
+		LARGE_INTEGER lastUpdate = {};
+		oneeuro::Quat rotationFilter;
+		oneeuro::Vec3 translationFilter;
+
+		void reset() { valid = false; rotationFilter.reset(); translationFilter.reset(); }
+	};
+	DeviceFilter deviceFilters[vr::k_unMaxTrackedDeviceCount];
+	std::atomic<double> deviceSmoothing{ 0.0 };
 
 	struct TrackerFilter
 	{

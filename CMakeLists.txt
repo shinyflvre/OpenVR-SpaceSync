@@ -36,6 +36,8 @@ add_executable(SpaceSync
     "src/overlay/IPCClient.cpp"
     "src/overlay/UserInterface.cpp"
     "src/overlay/Theme.cpp"
+    "src/overlay/TrackingPreview.cpp"
+    "src/overlay/Lighthouse.cpp"
     "src/overlay/Sound.cpp"
     "src/overlay/EmbeddedFiles.cpp"
 )
@@ -75,6 +77,7 @@ target_link_libraries(SpaceSync
         Eigen
         PicoJSON
         winmm
+        windowsapp
 )
 
 add_library(driver_spacesync SHARED

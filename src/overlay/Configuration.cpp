@@ -100,6 +100,20 @@ static void ParseProfile(CalibrationContext &ctx, std::istream &stream)
 	else
 		ctx.noHeadTracker = false;
 
+	if (obj["mountRefined"].is<bool>())
+		ctx.mountRefined = obj["mountRefined"].get<bool>();
+	else
+		ctx.mountRefined = false;
+
+	if (obj["lhSmoothing"].is<double>())
+	{
+		ctx.lighthouseSmoothing = obj["lhSmoothing"].get<double>();
+		if (ctx.lighthouseSmoothing < 0.0) ctx.lighthouseSmoothing = 0.0;
+		if (ctx.lighthouseSmoothing > 100.0) ctx.lighthouseSmoothing = 100.0;
+	}
+	else
+		ctx.lighthouseSmoothing = 0.0;
+
 	if (obj["hideHeadTracker"].is<bool>())
 		ctx.hideHeadTracker = obj["hideHeadTracker"].get<bool>();
 	else
@@ -204,6 +218,9 @@ static void WriteProfile(CalibrationContext &ctx, std::ostream &out)
 	profile["continuousSync"].set<bool>(ctx.continuousSync);
 	profile["followSlam"].set<bool>(ctx.followSlamHmd);
 	profile["noHeadTracker"].set<bool>(ctx.noHeadTracker);
+	profile["mountRefined"].set<bool>(ctx.mountRefined);
+	double lhSmoothing = ctx.lighthouseSmoothing;
+	profile["lhSmoothing"].set<double>(lhSmoothing);
 	profile["hideHeadTracker"].set<bool>(ctx.hideHeadTracker);
 	double uiScale = ctx.uiScale;
 	profile["uiScale"].set<double>(uiScale);

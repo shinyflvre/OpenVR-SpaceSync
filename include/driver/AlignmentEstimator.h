@@ -52,6 +52,18 @@ struct YawTranslationEstimator
 	vr::HmdVector3d_t lastJumpTranslation = { 0, 0, 0 };
 	int lastJumpFrames = 0;
 
+	double resnapYawThreshold = 3.0 * POSE_PI / 180.0;
+	double resnapTranslationThreshold = 0.10;
+	int resnapArmFrames = 4;
+	int resnapCollectFrames = 6;
+	int resnapRun = 0;
+	int resnapCountdown = 0;
+	double resnapSin = 0.0;
+	double resnapCos = 0.0;
+	vr::HmdVector3d_t resnapSum = { 0, 0, 0 };
+	int resnapCollected = 0;
+	uint32_t resnaps = 0;
+
 	struct Cusum
 	{
 		double pos = 0.0;
@@ -113,6 +125,9 @@ struct YawTranslationEstimator
 		lastJumpYaw = 0.0;
 		lastJumpTranslation = { 0, 0, 0 };
 		lastJumpFrames = 0;
+		resnapRun = 0;
+		resnapCountdown = 0;
+		resnapCollected = 0;
 		ringCount = 0;
 		ringNext = 0;
 		yawDetector.reset();
@@ -179,6 +194,46 @@ struct YawTranslationEstimator
 
 		double residualYaw = wrapRad(yawInst - yaw);
 		vr::HmdVector3d_t residualTranslation = project(vecSub(translationFor(yaw, corrected, raw, scale), translation), raw, meanRaw);
+
+		if (resnapCountdown > 0)
+		{
+			vr::HmdVector3d_t tInst = translationFor(yawInst, corrected, raw, scale);
+			resnapSin += std::sin(yawInst);
+			resnapCos += std::cos(yawInst);
+			resnapSum = vecAdd(resnapSum, tInst);
+			resnapCollected++;
+			resnapCountdown--;
+			if (resnapCountdown > 0)
+				return false;
+			double yawNew = std::atan2(resnapSin, resnapCos);
+			vr::HmdVector3d_t translationNew = vecScale(resnapSum, 1.0 / resnapCollected);
+			lastJumpYaw = wrapRad(yawNew - yaw);
+			lastJumpTranslation = vecSub(translationNew, translation);
+			lastJumpFrames = resnapCollected;
+			yaw = yawNew;
+			translation = translationNew;
+			cooldown = cooldownSeconds;
+			jumps++;
+			resnaps++;
+			ringCount = 0;
+			ringNext = 0;
+			resetDetectors();
+			return true;
+		}
+
+		vr::HmdVector3d_t residualTranslationRaw = vecSub(translationFor(yaw, corrected, raw, scale), translation);
+		bool bigInnovation = std::fabs(residualYaw) > resnapYawThreshold || vecNorm(residualTranslationRaw) > resnapTranslationThreshold;
+		resnapRun = bigInnovation ? resnapRun + 1 : 0;
+		if (resnapRun >= resnapArmFrames)
+		{
+			resnapRun = 0;
+			resnapCountdown = resnapCollectFrames;
+			resnapSin = 0.0;
+			resnapCos = 0.0;
+			resnapSum = { 0, 0, 0 };
+			resnapCollected = 0;
+			return false;
+		}
 
 		if (still)
 		{
@@ -298,6 +353,15 @@ struct YawTranslationEstimator
 		return false;
 	}
 
+	void absorbTiltStep(const vr::HmdQuaternion_t& step)
+	{
+		if (!valid) return;
+		translation = quaternionRotateVector(quaternionConjugate(step), translation);
+		ringCount = 0;
+		ringNext = 0;
+		resetDetectors();
+	}
+
 	void absorbRefinement(const vr::HmdVector3d_t& dRotation, const vr::HmdVector3d_t& dTranslation, double dScale,
 		const vr::HmdQuaternion_t& rawRotation, const vr::HmdVector3d_t& rawPosition, const vr::HmdQuaternion_t& headRotationBase,
 		double baseScale, double effectiveScaleBefore)
@@ -339,6 +403,9 @@ struct YawTranslationEstimator
 
 		cooldown = cooldownSeconds;
 		jumps++;
+		resnapRun = 0;
+		resnapCountdown = 0;
+		resnapCollected = 0;
 		resetDetectors();
 	}
 
@@ -791,6 +858,8 @@ private:
 struct MountRefiner
 {
 	double blockSeconds = 60.0;
+	double maxBlockSeconds = 300.0;
+	double obsTarget = 0.2;
 	double obsMin = 0.15;
 	double obsScaleMin = 0.5;
 	double ridge = 0.05;
@@ -809,6 +878,11 @@ struct MountRefiner
 	double suspectTranslation = 0.03;
 	double suspectRotation = 3.0 * POSE_PI / 180.0;
 	bool scaleEnabled = true;
+	double tiltStep = 0.3 * POSE_PI / 180.0;
+	double maxTiltResidual = 2.0 * POSE_PI / 180.0;
+	double minTiltCandidate = 0.05 * POSE_PI / 180.0;
+	double minImprovementTilt = 0.1 * POSE_PI / 180.0;
+	double minImprovementRatioTilt = 0.9;
 
 	struct Block
 	{
@@ -892,15 +966,85 @@ struct MountRefiner
 			return cost < 0.0 ? 0.0 : cost;
 		}
 
-		double rotationCost(const vr::HmdVector3d_t& eps) const
+		double rotationCostTilt(const vr::HmdVector3d_t& eps, const vr::HmdVector3d_t& tilt3) const
 		{
 			double N = weight;
 			if (N <= 0.0) return 0.0;
 			vr::HmdVector3d_t a = sumR.mulTransposed({ 0, 1, 0 });
-			double qq = sumMM - 2.0 * vecDot(eps, sumRtM) + N * vecDot(eps, eps);
-			double s = sumM.v[1] - vecDot(a, eps);
+			double qq = sumMM - 2.0 * vecDot(eps, sumRtM) - 2.0 * vecDot(tilt3, sumM)
+				+ N * vecDot(eps, eps) + N * vecDot(tilt3, tilt3)
+				+ 2.0 * vecDot(eps, sumR.mulTransposed(tilt3));
+			double s = sumM.v[1] - vecDot(a, eps) - tilt3.v[1] * N;
 			double cost = qq - s * s / N;
 			return cost < 0.0 ? 0.0 : cost;
+		}
+
+		double rotationCost(const vr::HmdVector3d_t& eps) const
+		{
+			return rotationCostTilt(eps, { 0, 0, 0 });
+		}
+
+		void translationObs(double obs[3]) const
+		{
+			double N = weight;
+			for (int i = 0; i < 3; i++)
+			{
+				double col = 0.0;
+				for (int k = 0; k < 3; k++) col += sumR.m[k][i] * sumR.m[k][i];
+				obs[i] = N > 0.0 ? 1.0 - col / (N * N) : 0.0;
+			}
+		}
+
+		bool solveRotationTilt(vr::HmdVector3d_t& eps, double tiltXZ[2], double obs[3], double obsTilt[2], double ridge) const
+		{
+			double N = weight;
+			if (N <= 0.0) return false;
+			vr::HmdVector3d_t a = sumR.mulTransposed({ 0, 1, 0 });
+			vr::HmdVector3d_t mtX = sumR.mulTransposed({ 1, 0, 0 });
+			vr::HmdVector3d_t mtZ = sumR.mulTransposed({ 0, 0, 1 });
+
+			double A[25], b[5], x[5];
+			for (int i = 0; i < 3; i++)
+			{
+				obs[i] = 1.0 - a.v[i] * a.v[i] / (N * N);
+				for (int j = 0; j < 3; j++)
+					A[i * 5 + j] = (i == j ? N + ridge * N : 0.0) - a.v[i] * a.v[j] / N;
+				A[i * 5 + 3] = mtX.v[i];
+				A[i * 5 + 4] = mtZ.v[i];
+				A[3 * 5 + i] = mtX.v[i];
+				A[4 * 5 + i] = mtZ.v[i];
+				b[i] = sumRtM.v[i] - a.v[i] * sumM.v[1] / N;
+			}
+			A[3 * 5 + 3] = N + ridge * N;
+			A[3 * 5 + 4] = 0.0;
+			A[4 * 5 + 3] = 0.0;
+			A[4 * 5 + 4] = N + ridge * N;
+			b[3] = sumM.v[0];
+			b[4] = sumM.v[2];
+
+			{
+				double AeeX[9], AeeZ[9], bX[3], bZ[3], xX[3], xZ[3];
+				for (int i = 0; i < 3; i++)
+					for (int j = 0; j < 3; j++)
+					{
+						AeeX[i * 3 + j] = A[i * 5 + j];
+						AeeZ[i * 3 + j] = A[i * 5 + j];
+					}
+				for (int i = 0; i < 3; i++) { bX[i] = mtX.v[i]; bZ[i] = mtZ.v[i]; }
+				bool okX = solveLinearSystem(3, AeeX, bX, xX);
+				bool okZ = solveLinearSystem(3, AeeZ, bZ, xZ);
+				double sXX = okX ? (N + ridge * N) - (mtX.v[0] * xX[0] + mtX.v[1] * xX[1] + mtX.v[2] * xX[2]) : 0.0;
+				double sZZ = okZ ? (N + ridge * N) - (mtZ.v[0] * xZ[0] + mtZ.v[1] * xZ[1] + mtZ.v[2] * xZ[2]) : 0.0;
+				obsTilt[0] = sXX > 0.0 ? sXX / N : 0.0;
+				obsTilt[1] = sZZ > 0.0 ? sZZ / N : 0.0;
+			}
+
+			if (!solveLinearSystem(5, A, b, x))
+				return false;
+			eps = { x[0], x[1], x[2] };
+			tiltXZ[0] = x[3];
+			tiltXZ[1] = x[4];
+			return true;
 		}
 
 		bool solveRotation(vr::HmdVector3d_t& eps, double obs[3], double ridge) const
@@ -923,12 +1067,7 @@ struct MountRefiner
 		bool solveTranslation(vr::HmdVector3d_t& delta, double& kappa, double obs[3], double& obsScale, double ridge, double spreadRidge) const
 		{
 			double N = weight;
-			for (int i = 0; i < 3; i++)
-			{
-				double col = 0.0;
-				for (int k = 0; k < 3; k++) col += sumR.m[k][i] * sumR.m[k][i];
-				obs[i] = 1.0 - col / (N * N);
-			}
+			translationObs(obs);
 			obsScale = (sumXX - vecDot(sumX, sumX) / N) / N;
 
 			double B[25], c[5], v[5], Cm[15];
@@ -984,7 +1123,13 @@ struct MountRefiner
 	double solvedScale = 0.0;
 	double obsRotation[3] = { 0, 0, 0 };
 	double obsTranslation[3] = { 0, 0, 0 };
+	double obsTilt[2] = { 0, 0 };
 	double obsScale = 0.0;
+	vr::HmdVector3d_t solvedTilt = { 0, 0, 0 };
+	bool lastAcceptedTilt = false;
+	double lastTiltBefore = 0.0;
+	double lastTiltAfter = 0.0;
+	uint32_t appliedTilt = 0;
 	double lastRmsBefore = 0.0;
 	double lastRmsAfter = 0.0;
 	double lastRotBefore = 0.0;
@@ -994,6 +1139,7 @@ struct MountRefiner
 	bool lastHadReference = false;
 	uint32_t solves = 0;
 	uint32_t applied = 0;
+	uint32_t appliedTranslation = 0;
 	bool suspected = false;
 
 	struct Delta
@@ -1001,6 +1147,7 @@ struct MountRefiner
 		vr::HmdVector3d_t rotation = { 0, 0, 0 };
 		vr::HmdVector3d_t translation = { 0, 0, 0 };
 		double scale = 0.0;
+		vr::HmdVector3d_t tilt = { 0, 0, 0 };
 	};
 
 	void reset()
@@ -1013,7 +1160,10 @@ struct MountRefiner
 		solvedRotation = { 0, 0, 0 };
 		solvedTranslation = { 0, 0, 0 };
 		solvedScale = 0.0;
+		solvedTilt = { 0, 0, 0 };
 		suspected = false;
+		appliedTranslation = 0;
+		appliedTilt = 0;
 	}
 
 	void clearSums()
@@ -1071,12 +1221,30 @@ struct MountRefiner
 	{
 		out = Delta();
 		if (current.weight < blockSeconds) return false;
+		if (current.weight < maxBlockSeconds)
+		{
+			double obsNow[3];
+			current.translationObs(obsNow);
+			if (obsNow[0] < obsTarget || obsNow[2] < obsTarget)
+				return false;
+		}
 
 		vr::HmdVector3d_t epsSol = { 0, 0, 0 }, delSol = { 0, 0, 0 };
 		double kapSol = 0.0;
-		bool okR = current.solveRotation(epsSol, obsRotation, ridge);
+		double tiltSol[2] = { 0.0, 0.0 };
+		bool okR = current.solveRotationTilt(epsSol, tiltSol, obsRotation, obsTilt, ridge);
 		bool okT = current.solveTranslation(delSol, kapSol, obsTranslation, obsScale, ridge, spreadRidge);
 		solves++;
+
+		vr::HmdVector3d_t candTilt = { 0, 0, 0 };
+		if (okR)
+		{
+			if (obsTilt[0] > obsMin) candTilt.v[0] = tiltSol[0];
+			if (obsTilt[1] > obsMin) candTilt.v[2] = tiltSol[1];
+			double tiltNorm = vecNorm(candTilt);
+			if (tiltNorm > maxTiltResidual) candTilt = vecScale(candTilt, maxTiltResidual / tiltNorm);
+		}
+		solvedTilt = candTilt;
 
 		vr::HmdVector3d_t candR = rotation, candT = translation;
 		double candS = scale;
@@ -1102,7 +1270,9 @@ struct MountRefiner
 		lastHadReference = previous.weight >= blockSeconds * 0.5;
 		lastAcceptedTranslation = false;
 		lastAcceptedRotation = false;
+		lastAcceptedTilt = false;
 		lastRmsBefore = lastRmsAfter = lastRotBefore = lastRotAfter = 0.0;
+		lastTiltBefore = lastTiltAfter = 0.0;
 
 		if (lastHadReference)
 		{
@@ -1111,8 +1281,25 @@ struct MountRefiner
 			lastRmsAfter = std::sqrt(previous.translationCost(candT, candS) / N);
 			lastRotBefore = std::sqrt(previous.rotationCost(rotation) / N);
 			lastRotAfter = std::sqrt(previous.rotationCost(candR) / N);
-			lastAcceptedTranslation = okT && lastRmsAfter <= lastRmsBefore - minImprovementTranslation && lastRmsAfter <= minImprovementRatio * lastRmsBefore;
-			lastAcceptedRotation = okR && lastRotAfter <= lastRotBefore - minImprovementRotation && lastRotAfter <= minImprovementRatioRotation * lastRotBefore;
+
+			if (okR && vecNorm(candTilt) > minTiltCandidate)
+			{
+				lastTiltBefore = std::sqrt(previous.rotationCostTilt(rotation, { 0, 0, 0 }) / N);
+				lastTiltAfter = std::sqrt(previous.rotationCostTilt(rotation, candTilt) / N);
+				if (lastTiltAfter <= lastTiltBefore - minImprovementTilt && lastTiltAfter <= minImprovementRatioTilt * lastTiltBefore)
+				{
+					vr::HmdVector3d_t step = candTilt;
+					double sn2 = vecNorm(step);
+					if (sn2 > tiltStep) step = vecScale(step, tiltStep / sn2);
+					out.tilt = quaternionRotateVector(quaternionFromYaw(yawReference), step);
+					lastAcceptedTilt = true;
+					appliedTilt++;
+					applied++;
+				}
+			}
+
+			lastAcceptedTranslation = !lastAcceptedTilt && okT && lastRmsAfter <= lastRmsBefore - minImprovementTranslation && lastRmsAfter <= minImprovementRatio * lastRmsBefore;
+			lastAcceptedRotation = !lastAcceptedTilt && okR && lastRotAfter <= lastRotBefore - minImprovementRotation && lastRotAfter <= minImprovementRatioRotation * lastRotBefore;
 
 			if (lastAcceptedTranslation)
 			{
@@ -1127,6 +1314,7 @@ struct MountRefiner
 				scale += ds;
 				out.scale = ds;
 				suspected = tn > suspectTranslation;
+				appliedTranslation++;
 			}
 			if (lastAcceptedRotation)
 			{

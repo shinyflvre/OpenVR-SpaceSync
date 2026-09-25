@@ -496,6 +496,7 @@ void SendOneEuroParams()
 	req.setOneEuro.headEnabled = CalCtx.headFilterEnabled;
 	req.setOneEuro.head = CalCtx.headFilterParams;
 	req.setOneEuro.drift = CalCtx.driftFilterParams;
+	req.setOneEuro.deviceSmoothing = CalCtx.lighthouseSmoothing;
 
 	try
 	{
@@ -560,6 +561,24 @@ void ComputeRelativeOffset(CalibrationContext &ctx, const std::vector<Sample> &s
 		q.coeffs() = -q.coeffs();
 
 	transAccum /= (double)samples.size();
+
+	if (ctx.mountRefined)
+	{
+		Eigen::Quaterniond stored(ctx.relativeRotation.w, ctx.relativeRotation.x, ctx.relativeRotation.y, ctx.relativeRotation.z);
+		Eigen::Vector3d storedT(ctx.relativeTranslation.v[0], ctx.relativeTranslation.v[1], ctx.relativeTranslation.v[2]);
+		double angDeg = stored.angularDistance(q) * 180.0 / EIGEN_PI;
+		double transM = (storedT - transAccum).norm();
+		if (angDeg < 5.0 && transM < 0.03)
+		{
+			char buf[256];
+			snprintf(buf, sizeof buf, "Keeping refined mount offset (fresh measurement differs %.1f mm / %.2f deg)\n", transM * 1000.0, angDeg);
+			ctx.Log(buf);
+			ctx.validRelativeOffset = true;
+			return;
+		}
+		ctx.mountRefined = false;
+		ctx.Log("Refined mount offset discarded, tracker seems to have been remounted\n");
+	}
 
 	ctx.relativeRotation.w = q.w();
 	ctx.relativeRotation.x = q.x();
@@ -710,6 +729,11 @@ void ScanAndApplyProfile(CalibrationContext &ctx)
 					ctx.relativeRotation = st.offsetRotation;
 					ctx.relativeTranslation = st.offsetTranslation;
 					ctx.hmdScale = st.hmdScale;
+					ctx.refinementDirty = true;
+				}
+				if (st.refinementTranslationSolves >= 1 && !ctx.mountRefined)
+				{
+					ctx.mountRefined = true;
 					ctx.refinementDirty = true;
 				}
 				if (ctx.refinementDirty && ctx.timeLastTick - ctx.timeRefinementSaved > 30.0)

@@ -37,6 +37,7 @@
 #include "Configuration.h"
 #include "UserInterface.h"
 #include "Sound.h"
+#include "Lighthouse.h"
 
 #ifdef _WIN32
 extern "C" __declspec(dllexport) unsigned long NvOptimusEnablement = 0x00000001;
@@ -187,6 +188,7 @@ int main(int argc, char** argv)
     }
 
     sound::Init();
+    lighthouse::Init();
     if (!SDL_Init(SDL_INIT_VIDEO)) {
 #ifdef _WIN32
         MessageBoxA(NULL, SDL_GetError(), APP_NAME, MB_OK);
@@ -364,6 +366,7 @@ int main(int argc, char** argv)
 
     ImGui::DestroyContext();
 
+    lighthouse::Shutdown();
     sound::Shutdown();
     SDL_Quit();
     vr::VR_Shutdown();

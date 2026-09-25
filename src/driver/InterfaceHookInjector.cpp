@@ -18,8 +18,10 @@ static Hook<void(*)(void*, uint32_t, const vr::DriverPose_t &, uint32_t)>
 static void DetourTrackedDevicePoseUpdated005(void* _this, uint32_t unWhichDevice, const vr::DriverPose_t &newPose, uint32_t unPoseStructSize)
 {
 	if (sizeof(vr::DriverPose_t) != unPoseStructSize)
+	{
+		TrackedDevicePoseUpdatedHook005.originalFunc(_this, unWhichDevice, newPose, unPoseStructSize);
 		return;
-	//TRACE("ServerTrackedDeviceProvider::DetourTrackedDevicePoseUpdated(%d)", unWhichDevice);
+	}
 	auto pose = newPose;
 	if (g_server.HandleDevicePoseUpdated(unWhichDevice, pose))
 	{
@@ -30,8 +32,10 @@ static void DetourTrackedDevicePoseUpdated005(void* _this, uint32_t unWhichDevic
 static void DetourTrackedDevicePoseUpdated006(void* _this, uint32_t unWhichDevice, const vr::DriverPose_t &newPose, uint32_t unPoseStructSize)
 {
 	if (sizeof(vr::DriverPose_t) != unPoseStructSize)
+	{
+		TrackedDevicePoseUpdatedHook006.originalFunc(_this, unWhichDevice, newPose, unPoseStructSize);
 		return;
-	//TRACE("ServerTrackedDeviceProvider::DetourTrackedDevicePoseUpdated(%d)", unWhichDevice);
+	}
 	auto pose = newPose;
 	if (g_server.HandleDevicePoseUpdated(unWhichDevice, pose))
 	{

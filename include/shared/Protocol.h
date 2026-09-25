@@ -13,7 +13,7 @@
 
 namespace protocol
 {
-	const uint32_t Version = 12;
+	const uint32_t Version = 14;
 
 	enum RequestType
 	{
@@ -108,6 +108,7 @@ namespace protocol
 		bool headEnabled;
 		OneEuroParams head;
 		OneEuroParams drift;
+		double deviceSmoothing;
 	};
 
 	struct DriverStatus
@@ -123,6 +124,7 @@ namespace protocol
 		double sigmaTranslationM;
 		double calmSeconds;
 		uint32_t refinementSolves;
+		uint32_t refinementTranslationSolves;
 		bool refinementValid;
 		vr::HmdQuaternion_t offsetRotation;
 		vr::HmdVector3d_t offsetTranslation;

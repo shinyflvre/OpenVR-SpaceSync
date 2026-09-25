@@ -45,6 +45,7 @@ struct CalibrationContext
 	bool lastCalibrationOk = false;   // did the last calibration run succeed
 	protocol::DriverStatus driverStatus = {};
 	bool refinementDirty = false;
+	bool mountRefined = false;
 	double timeRefinementSaved = 0.0;
 	double timeLastTick = 0, timeLastScan = 0;
 	double wantedUpdateInterval = 1.0;
@@ -61,6 +62,7 @@ struct CalibrationContext
 	bool headFilterEnabled = false;
 	protocol::OneEuroParams headFilterParams = { 5.0, 0.8, 1.0 };
 	protocol::OneEuroParams driftFilterParams = { 3.0, 1.3, 0.6 };
+	double lighthouseSmoothing = 0.0;
 
 	vr::VRNotificationId notificationId = 0;
 
@@ -98,6 +100,7 @@ struct CalibrationContext
 		relativeRotation = { 1, 0, 0, 0 };
 		relativeTranslation = { 0, 0, 0 };
 		validRelativeOffset = false;
+		mountRefined = false;
 		targetTrackingSystem = "";
 		hmdSerial = "";
 		trackerSerial = "";
