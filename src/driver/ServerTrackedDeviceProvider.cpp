@@ -240,9 +240,22 @@ void ServerTrackedDeviceProvider::SetOneEuro(const protocol::SetOneEuro& cmd)
 		{
 			f.rotationFilter.params = p;
 			f.translationFilter.params = p;
+			f.velocityFilter.params = p;
+			f.angularVelocityFilter.params = p;
+			f.accelerationFilter.params = p;
+			f.angularAccelerationFilter.params = p;
 			f.reset();
 		}
-		LOG("Lighthouse device smoothing %s: %.0f %% (cutoff %.2f Hz)", ds >= 0.5 ? "enabled" : "disabled", ds, minCutoff);
+		LARGE_INTEGER smoothNow;
+		QueryPerformanceCounter(&smoothNow);
+		LARGE_INTEGER smoothFreq;
+		QueryPerformanceFrequency(&smoothFreq);
+		double smoothNowSeconds = smoothNow.QuadPart / (double)smoothFreq.QuadPart;
+		if (smoothNowSeconds - deviceSmoothingLogTime > 1.0)
+		{
+			deviceSmoothingLogTime = smoothNowSeconds;
+			LOG("Lighthouse device smoothing %s: %.0f %% (cutoff %.2f Hz)", ds >= 0.5 ? "enabled" : "disabled", ds, minCutoff);
+		}
 	}
 }
 
@@ -688,9 +701,18 @@ bool ServerTrackedDeviceProvider::HandleDevicePoseUpdated(uint32_t openVRID, vr:
 				df.valid = true;
 				pose.qRotation = df.rotationFilter.filter(pose.qRotation, fdt);
 				vr::HmdVector3d_t smoothed = df.translationFilter.filter(vecFromArray(pose.vecPosition), fdt);
-				pose.vecPosition[0] = smoothed.v[0];
-				pose.vecPosition[1] = smoothed.v[1];
-				pose.vecPosition[2] = smoothed.v[2];
+				vr::HmdVector3d_t vel = df.velocityFilter.filter(vecFromArray(pose.vecVelocity), fdt);
+				vr::HmdVector3d_t angVel = df.angularVelocityFilter.filter(vecFromArray(pose.vecAngularVelocity), fdt);
+				vr::HmdVector3d_t acc = df.accelerationFilter.filter(vecFromArray(pose.vecAcceleration), fdt);
+				vr::HmdVector3d_t angAcc = df.angularAccelerationFilter.filter(vecFromArray(pose.vecAngularAcceleration), fdt);
+				for (int i = 0; i < 3; i++)
+				{
+					pose.vecPosition[i] = smoothed.v[i];
+					pose.vecVelocity[i] = vel.v[i];
+					pose.vecAngularVelocity[i] = angVel.v[i];
+					pose.vecAcceleration[i] = acc.v[i];
+					pose.vecAngularAcceleration[i] = angAcc.v[i];
+				}
 			}
 		}
 	}

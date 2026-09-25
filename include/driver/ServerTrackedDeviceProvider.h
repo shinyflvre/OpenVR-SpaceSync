@@ -282,11 +282,25 @@ private:
 		LARGE_INTEGER lastUpdate = {};
 		oneeuro::Quat rotationFilter;
 		oneeuro::Vec3 translationFilter;
+		oneeuro::Vec3 velocityFilter;
+		oneeuro::Vec3 angularVelocityFilter;
+		oneeuro::Vec3 accelerationFilter;
+		oneeuro::Vec3 angularAccelerationFilter;
 
-		void reset() { valid = false; rotationFilter.reset(); translationFilter.reset(); }
+		void reset()
+		{
+			valid = false;
+			rotationFilter.reset();
+			translationFilter.reset();
+			velocityFilter.reset();
+			angularVelocityFilter.reset();
+			accelerationFilter.reset();
+			angularAccelerationFilter.reset();
+		}
 	};
 	DeviceFilter deviceFilters[vr::k_unMaxTrackedDeviceCount];
 	std::atomic<double> deviceSmoothing{ 0.0 };
+	double deviceSmoothingLogTime = 0.0;
 
 	struct TrackerFilter
 	{
