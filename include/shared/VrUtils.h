@@ -29,11 +29,9 @@ static auto OpenVRManifestInstalled(const char* appKey) -> bool
     return vr::VRApplications()->IsApplicationInstalled(appKey);
 }
 
-static auto OpenVRManifestInstall() -> void 
+static auto OpenVRManifestInstall(const std::string& directory) -> void
 {
-    std::string manifestPath = {};
-    manifestPath += SDL_GetCurrentDirectory();
-    manifestPath += "manifest.vrmanifest";
+    std::string manifestPath = directory + "\\manifest.vrmanifest";
 
     vr::EVRApplicationError result = vr::VRApplications()->AddApplicationManifest(manifestPath.data());
     if (result > vr::VRApplicationError_None)

@@ -136,8 +136,6 @@ Section "Install" SecInstall
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayName" "${APP_NAME}"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
 
-    CreateShortCut "$SMPROGRAMS\${APP_NAME}.lnk" "$INSTDIR\SpaceSync.exe"
-
     Var /GLOBAL vrRuntimePath
 	nsExec::ExecToStack '"$INSTDIR\SpaceSync.exe" -openvrpath'
 	Pop $0
@@ -147,6 +145,7 @@ Section "Install" SecInstall
     ExecWait '"$vrRuntimePath\bin\win64\vrpathreg.exe" adddriver "$INSTDIR\driver"'
 
 	SetOutPath "$INSTDIR"
+	CreateShortCut "$SMPROGRAMS\${APP_NAME}.lnk" "$INSTDIR\SpaceSync.exe"
 	nsExec::ExecToLog '"$INSTDIR\SpaceSync.exe" -installmanifest'
 	nsExec::ExecToLog '"$INSTDIR\SpaceSync.exe" -activatemultipledrivers'
 

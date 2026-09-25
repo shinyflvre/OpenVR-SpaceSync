@@ -39,6 +39,19 @@
 #include "Sound.h"
 #include "Lighthouse.h"
 
+static std::string ExeDirectory()
+{
+#ifdef _WIN32
+    char path[1024] = {};
+    GetModuleFileNameA(nullptr, path, sizeof(path));
+    std::string s(path);
+    size_t slash = s.find_last_of("\\/");
+    return slash == std::string::npos ? std::string(".") : s.substr(0, slash);
+#else
+    return ".";
+#endif
+}
+
 #ifdef _WIN32
 extern "C" __declspec(dllexport) unsigned long NvOptimusEnablement = 0x00000001;
 extern "C" __declspec(dllexport) unsigned long AmdPowerXpressRequestHighPerformance = 0x00000001;
@@ -152,7 +165,7 @@ int main(int argc, char** argv)
     UpdateApplicationRefreshRate();
 
     try {
-        if (!OpenVRManifestInstalled(APP_KEY)) OpenVRManifestInstall();
+        if (!OpenVRManifestInstalled(APP_KEY)) OpenVRManifestInstall(ExeDirectory());
     }
     catch (std::exception& ex) {
 #ifdef _WIN32
@@ -419,7 +432,7 @@ static auto HandleCommandLine(int argc, char** argv) -> void
                     vr::VRApplications()->RemoveApplicationManifest(oldManifest.c_str());
                 }
             }
-            std::string manifestPath = std::string(cwd) + "\\manifest.vrmanifest";
+            std::string manifestPath = ExeDirectory() + "\\manifest.vrmanifest";
             auto vrAppErr = vr::VRApplications()->AddApplicationManifest(manifestPath.c_str());
             if (vrAppErr != vr::VRApplicationError_None)
                 fprintf(stderr, "Failed to add manifest: %s\n", vr::VRApplications()->GetApplicationsErrorNameFromEnum(vrAppErr));
@@ -441,7 +454,7 @@ static auto HandleCommandLine(int argc, char** argv) -> void
         {
             if (vr::VRApplications()->IsApplicationInstalled(APP_KEY))
             {
-                std::string manifestPath = std::string(cwd) + "\\manifest.vrmanifest";
+                std::string manifestPath = ExeDirectory() + "\\manifest.vrmanifest";
                 vr::VRApplications()->RemoveApplicationManifest(manifestPath.c_str());
             }
             vr::VR_Shutdown();
