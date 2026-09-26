@@ -260,7 +260,7 @@ void ServerTrackedDeviceProvider::SetOneEuro(const protocol::SetOneEuro& cmd)
 }
 
 void ServerTrackedDeviceProvider::UpdateDrift(const vr::HmdQuaternion_t& correctedRotation, const double(&correctedPosition)[3],
-	const vr::HmdQuaternion_t& rawRotation, const double(&rawPosition)[3], double confidence)
+	const vr::HmdQuaternion_t& rawRotation, const double(&rawPosition)[3], double confidence, double quality)
 {
 	vr::HmdQuaternion_t invTilt = quaternionConjugate(worldTilt);
 	vr::HmdQuaternion_t correctedRotationT = quaternionNormalize(invTilt * correctedRotation);
@@ -278,16 +278,20 @@ void ServerTrackedDeviceProvider::UpdateDrift(const vr::HmdQuaternion_t& correct
 
 	auto& est = drift.estimator;
 	double yawBefore = est.valid ? est.yaw : 0.0;
-	bool snapped = est.update(quaternionYawRad(instRot), correctedPositionT, vecFromArray(rawPosition), rawRotation, slamScale, confidence, dt);
+	bool snapped = est.update(quaternionYawRad(instRot), correctedPositionT, vecFromArray(rawPosition), rawRotation, slamScale, confidence, dt, quality);
 	drift.rotation = quaternionNormalize(worldTilt * est.rotation());
 	drift.translation = quaternionRotateVector(worldTilt, est.translation);
 	drift.valid = true;
 
 	if (snapped)
 	{
-		LOG("Drift jump compensated: yaw %.2f -> %.2f deg, translation delta %.1f cm, %d frames, sigma %.2f deg / %.1f mm",
-			yawBefore * 180.0 / POSE_PI, est.yaw * 180.0 / POSE_PI, vecNorm(est.lastJumpTranslation) * 100.0, est.lastJumpFrames,
-			est.sigmaYaw() * 180.0 / POSE_PI, est.sigmaTranslation() * 1000.0);
+		if (est.lastSnapReverted)
+			LOG("Alignment flip-flop reverted: yaw back to %.2f deg (was heading to %.2f), measurement latched unstable",
+				est.yaw * 180.0 / POSE_PI, yawBefore * 180.0 / POSE_PI);
+		else
+			LOG("Drift jump compensated: yaw %.2f -> %.2f deg, translation delta %.1f cm, %d frames, sigma %.2f deg / %.1f mm",
+				yawBefore * 180.0 / POSE_PI, est.yaw * 180.0 / POSE_PI, vecNorm(est.lastJumpTranslation) * 100.0, est.lastJumpFrames,
+				est.sigmaYaw() * 180.0 / POSE_PI, est.sigmaTranslation() * 1000.0);
 		if (std::fabs(est.lastJumpYaw) > 0.05 || vecNorm(est.lastJumpTranslation) > 0.15)
 			clock.noteHmdDiscontinuity();
 		refine.shift(est.lastJumpYaw, est.lastJumpTranslation);
@@ -866,18 +870,45 @@ bool ServerTrackedDeviceProvider::HandleDevicePoseUpdated(uint32_t openVRID, vr:
 						}
 					}
 
-					double confidence = drift.valid ? DriftSampleConfidence(ts.linSpeed, ts.angSpeed) : 1.0;
+					if (!trackerOK)
+						trackerNotOKTime = nowSeconds;
+					double sinceNotOK = nowSeconds - trackerNotOKTime;
+					double fReacquire = sinceNotOK < 2.0 ? 0.0 : (sinceNotOK < 5.0 ? (sinceNotOK - 2.0) / 3.0 : 1.0);
+
+					vr::HmdVector3d_t headFwd = quaternionRotateVector(rawRotation, { 0.0, 0.0, -1.0 });
+					double horizontal = std::sqrt(headFwd.v[0] * headFwd.v[0] + headFwd.v[2] * headFwd.v[2]);
+					double fPitch = (horizontal - 0.26) / (0.70 - 0.26);
+					if (fPitch < 0.15) fPitch = 0.15;
+					if (fPitch > 1.0) fPitch = 1.0;
+
+					double fStable = drift.estimator.unstable() ? 0.1 : 1.0;
+					double quality = fPitch * fReacquire * fStable;
+
+					int trust = quality >= 0.5 ? 0 : (drift.estimator.unstable() ? 2 : 1);
+					if (trust != measurementTrustState && nowSeconds - trustLogTime > 2.0)
+					{
+						trustLogTime = nowSeconds;
+						measurementTrustState = trust;
+						double pitchDeg = std::atan2(headFwd.v[1], horizontal) * 180.0 / POSE_PI;
+						if (trust == 0)
+							LOG("Measurement trust restored (head pitch %+.0f deg)", pitchDeg);
+						else
+							LOG("Measurement trust reduced: %s (head pitch %+.0f deg, tracker reacquired %.1f s ago, quality %.2f) - alignment holds instead of following",
+								trust == 2 ? "measurement unstable" : "weak geometry", pitchDeg, sinceNotOK, quality);
+					}
+
+					double confidence = drift.valid ? DriftSampleConfidence(ts.linSpeed, ts.angSpeed) * quality : 1.0;
 					const double maxLinSpeed = 2.75;
 					const double maxAngSpeed = 3.5;
 					const bool usable = age <= 0.05 && (!drift.valid || (ts.linSpeed < maxLinSpeed && ts.angSpeed < maxAngSpeed));
 					if (usable)
-						UpdateDrift(headRotation, headPosition, rawRotation, rawPosition, confidence);
+						UpdateDrift(headRotation, headPosition, rawRotation, rawPosition, confidence, quality);
 
 					if (usable && drift.valid && drift.estimator.weightSum >= 1.0)
 					{
 						vr::HmdVector3d_t angVelCal = quaternionRotateVector(hmdTracker.calibrationRotation, ts.angularVelocity);
 						double omegaYaw = angVelCal.v[1];
-						if (std::fabs(omegaYaw) > 1.0)
+						if (quality > 0.5 && std::fabs(omegaYaw) > 1.0)
 						{
 							double r = wrapRad(quaternionYawRad(instRot) - drift.estimator.yaw);
 							if (std::fabs(r) < 0.35)
@@ -889,7 +920,7 @@ bool ServerTrackedDeviceProvider::HandleDevicePoseUpdated(uint32_t openVRID, vr:
 						}
 						vr::HmdVector3d_t headVel = quaternionRotateVector(hmdTracker.calibrationRotation, ts.velocity);
 						double speed = vecNorm(headVel);
-						if (speed > 0.5)
+						if (quality > 0.5 && speed > 0.5)
 						{
 							vr::HmdVector3d_t predicted = vecAdd(quaternionRotateVector(drift.rotation, vecScale(vecFromArray(rawPosition), SlamToCorrectedScale())), drift.translation);
 							vr::HmdVector3d_t e = vecSub(headPositionVec, predicted);

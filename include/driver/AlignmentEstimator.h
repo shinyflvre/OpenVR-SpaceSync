@@ -56,13 +56,39 @@ struct YawTranslationEstimator
 	double resnapTranslationThreshold = 0.10;
 	int resnapArmFrames = 4;
 	int resnapCollectFrames = 6;
+	double resnapMinConfidence = 0.4;
+	double resnapMaxYawSpread = 1.2 * POSE_PI / 180.0;
+	double resnapMaxTranslationSpread = 0.04;
 	int resnapRun = 0;
 	int resnapCountdown = 0;
 	double resnapSin = 0.0;
 	double resnapCos = 0.0;
 	vr::HmdVector3d_t resnapSum = { 0, 0, 0 };
+	double resnapRefYaw = 0.0;
+	vr::HmdVector3d_t resnapRefTranslation = { 0, 0, 0 };
+	double resnapYawSpread = 0.0;
+	double resnapTranslationSpread = 0.0;
 	int resnapCollected = 0;
 	uint32_t resnaps = 0;
+
+	double instabilityYawGate = 1.5 * POSE_PI / 180.0;
+	double instabilityTranslationGate = 0.05;
+	double instabilitySpeedGate = 0.5;
+	double instabilityRise = 0.6;
+	double instabilityFall = 0.1;
+	double unstableLatchSeconds = 8.0;
+	double branchWindowSeconds = 12.0;
+	double branchYawTolerance = 1.5 * POSE_PI / 180.0;
+	double branchTranslationTolerance = 0.05;
+	double instabilityScore = 0.0;
+	bool unstableActive = false;
+	double branchYaw = 0.0;
+	vr::HmdVector3d_t branchTranslation = { 0, 0, 0 };
+	double branchAge = 1e9;
+	bool lastSnapReverted = false;
+	uint32_t reverts = 0;
+
+	bool unstable() const { return unstableActive; }
 
 	struct Cusum
 	{
@@ -128,6 +154,10 @@ struct YawTranslationEstimator
 		resnapRun = 0;
 		resnapCountdown = 0;
 		resnapCollected = 0;
+		instabilityScore = 0.0;
+		unstableActive = false;
+		branchAge = 1e9;
+		lastSnapReverted = false;
 		ringCount = 0;
 		ringNext = 0;
 		yawDetector.reset();
@@ -163,8 +193,10 @@ struct YawTranslationEstimator
 	}
 
 	bool update(double yawInst, const vr::HmdVector3d_t& corrected, const vr::HmdVector3d_t& raw, const vr::HmdQuaternion_t& rawRotation,
-		double scale, double confidence, double dt)
+		double scale, double confidence, double dt, double quality = 1.0)
 	{
+		if (quality < 0.0) quality = 0.0;
+		if (quality > 1.0) quality = 1.0;
 		if (dt <= 0.0) dt = 1.0 / 90.0;
 		if (confidence < 0.0) confidence = 0.0;
 		if (confidence > 1.0) confidence = 1.0;
@@ -195,9 +227,35 @@ struct YawTranslationEstimator
 		double residualYaw = wrapRad(yawInst - yaw);
 		vr::HmdVector3d_t residualTranslation = project(vecSub(translationFor(yaw, corrected, raw, scale), translation), raw, meanRaw);
 
+		branchAge += dt;
+
+		vr::HmdVector3d_t residualTranslationRaw = vecSub(translationFor(yaw, corrected, raw, scale), translation);
+		double rawSpeed = dt > 0.0 ? vecNorm(vecSub(raw, lastRaw)) / dt : 0.0;
+		bool bigResidual = std::fabs(residualYaw) > instabilityYawGate || vecNorm(residualTranslationRaw) > instabilityTranslationGate;
+		if (bigResidual && rawSpeed < instabilitySpeedGate)
+			instabilityScore = instabilityScore + dt > 3.0 ? 3.0 : instabilityScore + dt;
+		else
+		{
+			instabilityScore -= dt * 0.4;
+			if (instabilityScore < 0.0) instabilityScore = 0.0;
+		}
+		if (instabilityScore > instabilityRise) unstableActive = true;
+		else if (instabilityScore < instabilityFall) unstableActive = false;
+
 		if (resnapCountdown > 0)
 		{
 			vr::HmdVector3d_t tInst = translationFor(yawInst, corrected, raw, scale);
+			if (resnapCollected == 0)
+			{
+				resnapRefYaw = yawInst;
+				resnapRefTranslation = tInst;
+				resnapYawSpread = 0.0;
+				resnapTranslationSpread = 0.0;
+			}
+			double devY = std::fabs(wrapRad(yawInst - resnapRefYaw));
+			double devT = vecNorm(vecSub(tInst, resnapRefTranslation));
+			if (devY > resnapYawSpread) resnapYawSpread = devY;
+			if (devT > resnapTranslationSpread) resnapTranslationSpread = devT;
 			resnapSin += std::sin(yawInst);
 			resnapCos += std::cos(yawInst);
 			resnapSum = vecAdd(resnapSum, tInst);
@@ -205,13 +263,23 @@ struct YawTranslationEstimator
 			resnapCountdown--;
 			if (resnapCountdown > 0)
 				return false;
+			if (resnapYawSpread > resnapMaxYawSpread || resnapTranslationSpread > resnapMaxTranslationSpread)
+			{
+				instabilityScore = instabilityScore + 1.0 > 3.0 ? 3.0 : instabilityScore + 1.0;
+				resnapCollected = 0;
+				return false;
+			}
 			double yawNew = std::atan2(resnapSin, resnapCos);
 			vr::HmdVector3d_t translationNew = vecScale(resnapSum, 1.0 / resnapCollected);
-			lastJumpYaw = wrapRad(yawNew - yaw);
-			lastJumpTranslation = vecSub(translationNew, translation);
+			bool reverted = applyBranchOrStore(yawNew, translationNew);
+			if (!reverted)
+			{
+				lastJumpYaw = wrapRad(yawNew - yaw);
+				lastJumpTranslation = vecSub(translationNew, translation);
+				yaw = yawNew;
+				translation = translationNew;
+			}
 			lastJumpFrames = resnapCollected;
-			yaw = yawNew;
-			translation = translationNew;
 			cooldown = cooldownSeconds;
 			jumps++;
 			resnaps++;
@@ -221,9 +289,11 @@ struct YawTranslationEstimator
 			return true;
 		}
 
-		vr::HmdVector3d_t residualTranslationRaw = vecSub(translationFor(yaw, corrected, raw, scale), translation);
 		bool bigInnovation = std::fabs(residualYaw) > resnapYawThreshold || vecNorm(residualTranslationRaw) > resnapTranslationThreshold;
-		resnapRun = bigInnovation ? resnapRun + 1 : 0;
+		if (!unstableActive && confidence >= resnapMinConfidence)
+			resnapRun = bigInnovation ? resnapRun + 1 : 0;
+		else
+			resnapRun = 0;
 		if (resnapRun >= resnapArmFrames)
 		{
 			resnapRun = 0;
@@ -342,7 +412,8 @@ struct YawTranslationEstimator
 			yaw = wrapRad(yaw + g * residualYaw);
 		}
 
-		double floorWeight = confidence * confidence > translationFloorWeight ? confidence * confidence : translationFloorWeight;
+		double floorEff = translationFloorWeight * quality * quality;
+		double floorWeight = confidence * confidence > floorEff ? confidence * confidence : floorEff;
 		double wT = floorWeight * dt;
 		weightSumTranslation += wT;
 		if (weightSumTranslation > memorySeconds) weightSumTranslation = memorySeconds;
@@ -359,6 +430,7 @@ struct YawTranslationEstimator
 		translation = quaternionRotateVector(quaternionConjugate(step), translation);
 		ringCount = 0;
 		ringNext = 0;
+		branchAge = 1e9;
 		resetDetectors();
 	}
 
@@ -406,6 +478,7 @@ struct YawTranslationEstimator
 		resnapRun = 0;
 		resnapCountdown = 0;
 		resnapCollected = 0;
+		branchAge = 1e9;
 		resetDetectors();
 	}
 
@@ -572,18 +645,45 @@ private:
 		return n;
 	}
 
+	bool applyBranchOrStore(double yawNew, const vr::HmdVector3d_t& translationNew)
+	{
+		if (branchAge < branchWindowSeconds
+			&& std::fabs(wrapRad(yawNew - branchYaw)) < branchYawTolerance
+			&& vecNorm(vecSub(translationNew, branchTranslation)) < branchTranslationTolerance)
+		{
+			lastJumpYaw = wrapRad(branchYaw - yaw);
+			lastJumpTranslation = vecSub(branchTranslation, translation);
+			yaw = branchYaw;
+			translation = branchTranslation;
+			instabilityScore = 3.0;
+			unstableActive = true;
+			lastSnapReverted = true;
+			reverts++;
+			branchAge = 1e9;
+			return true;
+		}
+		branchYaw = yaw;
+		branchTranslation = translation;
+		branchAge = 0.0;
+		lastSnapReverted = false;
+		return false;
+	}
+
 	void snap(int len, double scale, bool snapYaw)
 	{
 		double yawNew;
 		vr::HmdVector3d_t translationNew, meanRawWindow;
 		int n = candidate(len, scale, snapYaw, yawNew, translationNew, &meanRawWindow);
 
-
-		lastJumpYaw = wrapRad(yawNew - yaw);
-		lastJumpTranslation = vecSub(translationNew, translation);
+		bool reverted = applyBranchOrStore(yawNew, translationNew);
+		if (!reverted)
+		{
+			lastJumpYaw = wrapRad(yawNew - yaw);
+			lastJumpTranslation = vecSub(translationNew, translation);
+			yaw = yawNew;
+			translation = translationNew;
+		}
 		lastJumpFrames = n;
-		yaw = yawNew;
-		translation = translationNew;
 		meanRaw = meanRawWindow;
 		if (weightSum > 1.0) weightSum = 1.0;
 		if (weightSumTranslation > 1.0) weightSumTranslation = 1.0;

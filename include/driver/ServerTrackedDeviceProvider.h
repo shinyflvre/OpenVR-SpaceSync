@@ -55,7 +55,7 @@ public:
 private:
 	// confidence 0..1 = how much this sample may move the drift estimate.
 	void UpdateDrift(const vr::HmdQuaternion_t &correctedRotation, const double (&correctedPosition)[3],
-		const vr::HmdQuaternion_t &rawRotation, const double (&rawPosition)[3], double confidence);
+		const vr::HmdQuaternion_t &rawRotation, const double (&rawPosition)[3], double confidence, double quality = 1.0);
 
 	// Drift changes slowly, but fast head motion makes a single sample unreliable, so weight by speed.
 	static double DriftSampleConfidence(double linSpeed, double angSpeed)
@@ -161,6 +161,9 @@ private:
 	double refineLogTime = 0.0;
 	double refineTauMovedSince = -1.0;
 	vr::HmdQuaternion_t worldTilt = { 1, 0, 0, 0 };
+	double trackerNotOKTime = -1e9;
+	int measurementTrustState = -1;
+	double trustLogTime = 0.0;
 
 	struct EffectiveOffsets
 	{
