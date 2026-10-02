@@ -490,6 +490,7 @@ int main(int argc, char** argv)
         lighthouse::Note(ex.what());
     }
 
+    lighthouse::SetEnabled(CalCtx.basestationControl);
     if (!g_desktopForced && CalCtx.dynamicBasestationPower)
         lighthouse::SetAutoWake(true);
     lighthouse::EnsureScanning();

@@ -806,12 +806,26 @@ static const StationImages& GetStationImages()
 void UserInterface::RenderLighthouse()
 {
 	const float maxW = std::min(820.0f, PageDesignWidth());
-	lighthouse::EnsureScanning();
 
 	TextWrapped(F.regular, 13.0f, P.textMuted, maxW,
 		"Turn your basestations on, into standby, or to sleep without a Lighthouse headset. "
 		"Works with V2 basestations over Bluetooth LE.");
 	VSpace(18.0f);
+
+	if (CheckboxRow("Basestation Control",
+		"Lets SpaceSync find your basestations over Bluetooth LE and connect to them. "
+		"Basestations accept only one connection at a time, so turn this off if another app manages them.",
+		&CalCtx.basestationControl, maxW))
+	{
+		lighthouse::SetEnabled(CalCtx.basestationControl);
+		SaveProfile(CalCtx);
+	}
+	VSpace(18.0f);
+
+	if (!CalCtx.basestationControl)
+		return;
+
+	lighthouse::EnsureScanning();
 
 	if (!lighthouse::Available())
 	{

@@ -398,6 +398,8 @@ static void LogRegistryResult(LSTATUS result)
 static const char *RegistryKey = "Software\\SpaceSync";
 // Old OpenVR-SpaceOverride profiles are read as fallback so nobody has to recalibrate.
 static const char *LegacyRegistryKey = "Software\\OpenVR-SpaceOverride";
+// Kept outside Config: WriteProfile saves nothing until a calibration exists, and this must hold from the first launch.
+static const char *BasestationControlValue = "BasestationControl";
 
 static std::string ReadRegistryValue(const char *key)
 {
@@ -454,6 +456,10 @@ void LoadProfile(CalibrationContext &ctx)
 {
 	ctx.validProfile = false;
 
+	DWORD control = 1, controlSize = sizeof control;
+	ctx.basestationControl = RegGetValueA(HKEY_CURRENT_USER_LOCAL_SETTINGS, RegistryKey, BasestationControlValue,
+		RRF_RT_REG_DWORD, 0, &control, &controlSize) != ERROR_SUCCESS || control != 0;
+
 	auto str = ReadRegistryKey();
 	if (str == "")
 	{
@@ -481,4 +487,7 @@ void SaveProfile(CalibrationContext &ctx)
 	std::stringstream io;
 	WriteProfile(ctx, io);
 	WriteRegistryKey(io.str());
+
+	DWORD control = ctx.basestationControl ? 1 : 0;
+	RegSetKeyValueA(HKEY_CURRENT_USER_LOCAL_SETTINGS, RegistryKey, BasestationControlValue, REG_DWORD, &control, sizeof control);
 }

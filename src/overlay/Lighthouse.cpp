@@ -85,6 +85,7 @@ namespace lighthouse
 		bool running = false;
 		bool scanning = false;
 		bool autoWake = false;
+		bool enabled = true;
 		bool available = true;
 		std::string availabilityError;
 		BluetoothLEAdvertisementWatcher watcher{ nullptr };
@@ -215,19 +216,20 @@ namespace lighthouse
 		{
 			SetBusy(cmd.address, true, nullptr);
 			const char* what = cmd.mode < 0 ? "refresh" : (cmd.mode == (int)Power::Awake ? "wake" : (cmd.mode == (int)Power::Standby ? "standby" : "sleep"));
-			const char* failure = nullptr;
+			const char* failure = "cancelled";
 			for (int attempt = 0; attempt < 3; attempt++)
 			{
+				if (attempt > 0)
+					std::this_thread::sleep_for(std::chrono::milliseconds(400));
+				{
+					std::lock_guard<std::mutex> lock(mutex);
+					if (!running || !enabled)
+						break;
+				}
 				failure = Attempt(cmd);
 				if (!failure)
 					break;
 				Log("%012llx %s attempt %d failed: %s", (unsigned long long)cmd.address, what, attempt + 1, failure);
-				{
-					std::lock_guard<std::mutex> lock(mutex);
-					if (!running)
-						break;
-				}
-				std::this_thread::sleep_for(std::chrono::milliseconds(400));
 			}
 			Log("%012llx %s -> %s", (unsigned long long)cmd.address, what, failure ? failure : "ok");
 			SetBusy(cmd.address, false, failure);
@@ -305,6 +307,8 @@ namespace lighthouse
 			std::string name(w.begin(), w.end());
 			{
 				std::lock_guard<std::mutex> lock(mutex);
+				if (!enabled)
+					return;
 				auto it = stations.find(address);
 				if (it == stations.end())
 				{
@@ -392,7 +396,7 @@ namespace lighthouse
 	{
 		{
 			std::lock_guard<std::mutex> lock(mutex);
-			if (scanning || !available)
+			if (scanning || !available || !enabled)
 				return;
 		}
 		bool ok = true;
@@ -454,7 +458,7 @@ namespace lighthouse
 	{
 		{
 			std::lock_guard<std::mutex> lock(mutex);
-			if (!running)
+			if (!running || !enabled)
 				return;
 			queue.push_back({ address, (int)mode });
 		}
@@ -465,7 +469,7 @@ namespace lighthouse
 	{
 		{
 			std::lock_guard<std::mutex> lock(mutex);
-			if (!running)
+			if (!running || !enabled)
 				return;
 			for (auto const& kv : stations)
 				queue.push_back({ kv.first, (int)mode });
@@ -477,7 +481,7 @@ namespace lighthouse
 	{
 		{
 			std::lock_guard<std::mutex> lock(mutex);
-			if (!running)
+			if (!running || !enabled)
 				return;
 			queue.push_back({ address, -1 });
 		}
@@ -516,6 +520,33 @@ namespace lighthouse
 		std::lock_guard<std::mutex> lock(mutex);
 		autoWake = enabled;
 		Log("auto-wake %s", enabled ? "enabled" : "disabled");
+	}
+
+	void SetEnabled(bool value)
+	{
+		BluetoothLEAdvertisementWatcher stopped{ nullptr };
+		{
+			std::lock_guard<std::mutex> lock(mutex);
+			if (enabled == value)
+				return;
+			enabled = value;
+			if (!enabled)
+			{
+				queue.clear();
+				stations.clear();
+				passive.clear();
+				stopped = watcher;
+				watcher = nullptr;
+				scanning = false;
+			}
+		}
+		Log("basestation control %s", value ? "enabled" : "disabled");
+		try
+		{
+			if (stopped)
+				stopped.Stop();
+		}
+		catch (...) {}
 	}
 
 	void StandbyAllAndWait(int timeoutMs)
