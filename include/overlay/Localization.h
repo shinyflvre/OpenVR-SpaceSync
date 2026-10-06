@@ -5,7 +5,7 @@
 
 namespace loc
 {
-	enum class Lang { English = 0, Japanese = 1, Chinese = 2 };
+	enum class Lang { English = 0, Japanese = 1, Chinese = 2, Korean = 3 };
 
 	void SetLanguage(Lang lang);
 	Lang Current();

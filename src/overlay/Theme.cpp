@@ -68,10 +68,13 @@ namespace ui
 
 		const char* jaCandidates[] = { "C:\\Windows\\Fonts\\YuGothM.ttc", "C:\\Windows\\Fonts\\YuGothR.ttc", "C:\\Windows\\Fonts\\meiryo.ttc" };
 		const char* scCandidates[] = { "C:\\Windows\\Fonts\\msyh.ttc", "C:\\Windows\\Fonts\\msyhl.ttc", "C:\\Windows\\Fonts\\simhei.ttf" };
+		const char* koCandidates[] = { "C:\\Windows\\Fonts\\malgun.ttf", "C:\\Windows\\Fonts\\malgunsl.ttf" };
 		const char* jaFont = nullptr;
 		const char* scFont = nullptr;
+		const char* koFont = nullptr;
 		for (const char* p : jaCandidates) { FILE* f = fopen(p, "rb"); if (f) { fclose(f); jaFont = p; break; } }
 		for (const char* p : scCandidates) { FILE* f = fopen(p, "rb"); if (f) { fclose(f); scFont = p; break; } }
+		for (const char* p : koCandidates) { FILE* f = fopen(p, "rb"); if (f) { fclose(f); koFont = p; break; } }
 
 		ImFontConfig cjk;
 		cjk.MergeMode = true;
@@ -83,6 +86,7 @@ namespace ui
 			ImFont* font = io.Fonts->AddFontFromMemoryCompressedTTF(data, size, base, &cfg);
 			if (jaFont) io.Fonts->AddFontFromFileTTF(jaFont, base, &cjk);
 			if (scFont) io.Fonts->AddFontFromFileTTF(scFont, base, &cjk);
+			if (koFont) io.Fonts->AddFontFromFileTTF(koFont, base, &cjk);
 			return font;
 		};
 

@@ -174,7 +174,7 @@ static void ParseProfile(CalibrationContext &ctx, std::istream &stream)
 		ctx.language = (int)obj["language"].get<double>();
 	else
 		ctx.language = 0;
-	if (ctx.language < 0 || ctx.language > 2)
+	if (ctx.language < 0 || ctx.language > 3)
 		ctx.language = 0;
 	loc::SetLanguage((loc::Lang)ctx.language);
 
