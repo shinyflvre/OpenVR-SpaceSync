@@ -2,6 +2,7 @@
 // Added by Shinyflvres, 2026-08-25. Part of SpaceSync, a modified version of OpenVR-SpaceOverride by Nyabsi (AGPL-3.0). See NOTICE.md
 
 #include "Sound.h"
+#include "Localization.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -113,7 +114,18 @@ namespace sound
 			}
 		}
 
+		const std::vector<uint8_t>* LoadFile(const std::string& name);
+
+		// Ukrainian voice cues live in sound/uk; anything missing there uses the English one.
 		const std::vector<uint8_t>* Load(const std::string& name)
+		{
+			if (loc::Current() == loc::Lang::Ukrainian)
+				if (const std::vector<uint8_t>* uk = LoadFile("uk/" + name))
+					return uk;
+			return LoadFile(name);
+		}
+
+		const std::vector<uint8_t>* LoadFile(const std::string& name)
 		{
 			auto it = cache.find(name);
 			if (it != cache.end())

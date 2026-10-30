@@ -41,13 +41,15 @@ fi
 
 say "Copying files / Копіюю файли → $APP"
 pkill -x SpaceSync 2>/dev/null && sleep 1 || true
-mkdir -p "$APP/sound" "$APP/images" "$APP/driver/bin/linux64"
+mkdir -p "$APP/sound/uk" "$APP/images" "$APP/fonts" "$APP/driver/bin/linux64"
 cp "$BUILD/SpaceSync" "$SRC/3rdparty/OpenVR/bin/linux64/libopenvr_api.so" "$APP/"
 cp "$SRC/resources/manifest.vrmanifest" "$SRC/resources/LICENSE" "$SRC/resources/LICENSE.txt" \
    "$SRC/resources/LICENSES" "$SRC/NOTICE.md" "$APP/"
 cp "$SRC/resources/icon_v2.png" "$APP/icon.png"
 cp "$SRC"/src/sound/*.wav "$APP/sound/"
+cp "$SRC"/src/sound/uk/*.wav "$APP/sound/uk/"
 cp "$SRC/resources/Basestation 2.0/"*.png "$APP/images/"
+cp "$SRC"/resources/fonts/* "$APP/fonts/"
 cp "$SRC/linux/driver.vrdrivermanifest" "$APP/driver/"
 cp "$BUILD/driver_spacesync.so" "$APP/driver/bin/linux64/"
 cp "$SRC/linux/uninstall.sh" "$APP/"

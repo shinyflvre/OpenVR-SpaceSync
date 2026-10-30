@@ -2,6 +2,8 @@
 // Added by Shinyflvres, 2026-08-23. Part of SpaceSync, a modified version of OpenVR-SpaceOverride by Nyabsi (AGPL-3.0). See NOTICE.md
 
 #include "Theme.h"
+#include <SDL3/SDL_filesystem.h>
+#include <string>
 #include "EmbeddedFiles.h"
 #include "Localization.h"
 
@@ -91,19 +93,25 @@ namespace ui
 		cjk.OversampleH = 2;
 		cjk.OversampleV = 2;
 
-		auto addWithCjk = [&](const void* data, int size) {
+		// The embedded fonts are Latin-only. Cyrillic (Ukrainian) comes from the same
+		// typefaces shipped next to the exe in fonts/, merged in as a fallback.
+		const char* basePath = SDL_GetBasePath();
+		std::string fontDir = std::string(basePath ? basePath : "") + "fonts/";
+		auto addWithCjk = [&](const void* data, int size, const char* cyrillicFile) {
 			ImFont* font = io.Fonts->AddFontFromMemoryCompressedTTF(data, size, base, &cfg);
+			std::string cyr = fontDir + cyrillicFile;
+			if (FILE* f = fopen(cyr.c_str(), "rb")) { fclose(f); io.Fonts->AddFontFromFileTTF(cyr.c_str(), base, &cjk); }
 			if (jaFont) io.Fonts->AddFontFromFileTTF(jaFont, base, &cjk);
 			if (scFont) io.Fonts->AddFontFromFileTTF(scFont, base, &cjk);
 			return font;
 		};
 
-		F.regular = addWithCjk(Manrope400_compressed_data, (int)Manrope400_compressed_size);
-		F.medium = addWithCjk(Manrope500_compressed_data, (int)Manrope500_compressed_size);
-		F.semibold = addWithCjk(Manrope600_compressed_data, (int)Manrope600_compressed_size);
-		F.bold = addWithCjk(Manrope700_compressed_data, (int)Manrope700_compressed_size);
-		F.mono = addWithCjk(JetBrainsMono400_compressed_data, (int)JetBrainsMono400_compressed_size);
-		F.monoMedium = addWithCjk(JetBrainsMono500_compressed_data, (int)JetBrainsMono500_compressed_size);
+		F.regular = addWithCjk(Manrope400_compressed_data, (int)Manrope400_compressed_size, "Manrope-cyrillic-400.ttf");
+		F.medium = addWithCjk(Manrope500_compressed_data, (int)Manrope500_compressed_size, "Manrope-cyrillic-500.ttf");
+		F.semibold = addWithCjk(Manrope600_compressed_data, (int)Manrope600_compressed_size, "Manrope-cyrillic-600.ttf");
+		F.bold = addWithCjk(Manrope700_compressed_data, (int)Manrope700_compressed_size, "Manrope-cyrillic-700.ttf");
+		F.mono = addWithCjk(JetBrainsMono400_compressed_data, (int)JetBrainsMono400_compressed_size, "JetBrainsMono-Regular.ttf");
+		F.monoMedium = addWithCjk(JetBrainsMono500_compressed_data, (int)JetBrainsMono500_compressed_size, "JetBrainsMono-Medium.ttf");
 		io.FontDefault = F.regular;
 
 		ImGuiStyle& style = ImGui::GetStyle();

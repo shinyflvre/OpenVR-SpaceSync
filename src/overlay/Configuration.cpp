@@ -174,7 +174,7 @@ static void ParseProfile(CalibrationContext &ctx, std::istream &stream)
 		ctx.language = (int)obj["language"].get<double>();
 	else
 		ctx.language = 0;
-	if (ctx.language < 0 || ctx.language > 2)
+	if (ctx.language < 0 || ctx.language >= loc::kLangCount)
 		ctx.language = 0;
 	loc::SetLanguage((loc::Lang)ctx.language);
 
@@ -405,6 +405,30 @@ static std::string ProfilePath()
 	return platform::DataDir() + "/profile.json";
 }
 
+// The profile is only written once there is a calibration, so the language
+// picked before the first calibration is kept in its own small file.
+static std::string LanguagePath()
+{
+	return platform::DataDir() + "/language";
+}
+
+static void SaveLanguageOnly(const CalibrationContext &ctx)
+{
+	std::ofstream out(LanguagePath(), std::ios::trunc);
+	out << ctx.language;
+}
+
+static void LoadLanguageOnly(CalibrationContext &ctx)
+{
+	std::ifstream in(LanguagePath());
+	int language = 0;
+	if (in >> language && language >= 0 && language < loc::kLangCount)
+	{
+		ctx.language = language;
+		loc::SetLanguage((loc::Lang)language);
+	}
+}
+
 static std::string ReadRegistryKey()
 {
 	std::ifstream in(ProfilePath());
@@ -504,6 +528,9 @@ void LoadProfile(CalibrationContext &ctx)
 	{
 		std::cout << "Profile is empty" << std::endl;
 		ctx.Clear();
+#ifndef _WIN32
+		LoadLanguageOnly(ctx);
+#endif
 		return;
 	}
 
@@ -526,4 +553,7 @@ void SaveProfile(CalibrationContext &ctx)
 	std::stringstream io;
 	WriteProfile(ctx, io);
 	WriteRegistryKey(io.str());
+#ifndef _WIN32
+	SaveLanguageOnly(ctx);
+#endif
 }
