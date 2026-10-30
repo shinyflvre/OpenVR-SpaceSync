@@ -6,3 +6,5 @@
 
 void LoadProfile(CalibrationContext &ctx);
 void SaveProfile(CalibrationContext &ctx);
+// Remembers the UI language on its own (Linux keeps it outside the calibration profile).
+void SaveLanguage(CalibrationContext &ctx);

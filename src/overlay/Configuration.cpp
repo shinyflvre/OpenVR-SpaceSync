@@ -553,6 +553,10 @@ void SaveProfile(CalibrationContext &ctx)
 	std::stringstream io;
 	WriteProfile(ctx, io);
 	WriteRegistryKey(io.str());
+}
+
+void SaveLanguage(CalibrationContext &ctx)
+{
 #ifndef _WIN32
 	SaveLanguageOnly(ctx);
 #endif

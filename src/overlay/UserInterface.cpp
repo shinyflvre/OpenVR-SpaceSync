@@ -379,6 +379,7 @@ UserInterface::WindowAction UserInterface::RenderTitleBar()
 				loc::SetLanguage((loc::Lang)i);
 				CalCtx.language = i;
 				SaveProfile(CalCtx);
+				SaveLanguage(CalCtx);
 			}
 			DrawText(dl, active ? F.semibold : F.medium, 12.0f, ImVec2(lx, (h - ns.y) * 0.5f), active ? P.textStrong : (langHovered ? P.textTitle : P.textFooter), kLangNames[i]);
 			lx += ns.x + px(8.0f);
