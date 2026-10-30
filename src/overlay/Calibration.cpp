@@ -20,6 +20,12 @@
 
 #include <Dense>
 
+#ifndef _WIN32
+// windows.h supplies min/max macros there; use the std ones here.
+using std::min;
+using std::max;
+#endif
+
 
 static IPCClient Driver;
 CalibrationContext CalCtx;

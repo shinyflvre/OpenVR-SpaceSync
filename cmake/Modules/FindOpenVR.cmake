@@ -62,11 +62,20 @@ if (OpenVR_FOUND)
     # OpenVR API requires the client DLL.
     if (NOT TARGET OpenVR::API)
         add_library(OpenVR::API SHARED IMPORTED)
-        set_target_properties(OpenVR::API
-            PROPERTIES
-                IMPORTED_IMPLIB "${OpenVR_LIBRARY}"
-                IMPORTED_LOCATION "${OpenVR_BINARY}"
-                INTERFACE_INCLUDE_DIRECTORIES "${OpenVR_INCLUDE_DIR}")
+        if (WIN32)
+            set_target_properties(OpenVR::API
+                PROPERTIES
+                    IMPORTED_IMPLIB "${OpenVR_LIBRARY}"
+                    IMPORTED_LOCATION "${OpenVR_BINARY}"
+                    INTERFACE_INCLUDE_DIRECTORIES "${OpenVR_INCLUDE_DIR}")
+        else ()
+            # Linux: the .so is both the link library and the runtime binary.
+            set_target_properties(OpenVR::API
+                PROPERTIES
+                    IMPORTED_LOCATION "${OpenVR_LIBRARY}"
+                    IMPORTED_NO_SONAME TRUE
+                    INTERFACE_INCLUDE_DIRECTORIES "${OpenVR_INCLUDE_DIR}")
+        endif ()
     endif ()
 
     # OpenVR Driver API is header only.

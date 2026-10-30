@@ -11,7 +11,7 @@
 #ifdef _WIN32
 #define EXPORT_FUNC extern "C" __declspec(dllexport)
 #else
-#define EXPORT_FUNC extern "C"
+#define EXPORT_FUNC extern "C" __attribute__((visibility("default")))
 #endif
 
 ServerTrackedDeviceProvider g_server;

@@ -4,7 +4,7 @@
 #include "Configuration.h"
 #include "Localization.h"
 
-#include <Windows.h>
+#include "Platform.h"
 
 #include <picojson.h>
 
@@ -398,6 +398,39 @@ static void WriteProfile(CalibrationContext &ctx, std::ostream &out)
 	out << profilesV.serialize(true);
 }
 
+#ifndef _WIN32
+// Linux: the profile lives in ~/.local/share/SpaceSync/profile.json instead of the registry.
+static std::string ProfilePath()
+{
+	return platform::DataDir() + "/profile.json";
+}
+
+static std::string ReadRegistryKey()
+{
+	std::ifstream in(ProfilePath());
+	if (!in)
+		return "";
+	std::stringstream buf;
+	buf << in.rdbuf();
+	return buf.str();
+}
+
+static void WriteRegistryKey(std::string str)
+{
+	// Write then rename, so a crash mid-save never leaves a half profile behind.
+	std::string tmp = ProfilePath() + ".tmp";
+	{
+		std::ofstream out(tmp, std::ios::trunc);
+		if (!out)
+		{
+			std::cerr << "Could not write " << tmp << std::endl;
+			return;
+		}
+		out << str;
+	}
+	std::rename(tmp.c_str(), ProfilePath().c_str());
+}
+#else
 static void LogRegistryResult(LSTATUS result)
 {
 	char *message;
@@ -459,6 +492,8 @@ static void WriteRegistryKey(std::string str)
 
 	RegCloseKey(hkey);
 }
+
+#endif
 
 void LoadProfile(CalibrationContext &ctx)
 {

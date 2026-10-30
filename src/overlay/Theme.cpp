@@ -66,8 +66,20 @@ namespace ui
 
 		const float base = FontPx(13.0f);
 
+#ifdef _WIN32
 		const char* jaCandidates[] = { "C:\\Windows\\Fonts\\YuGothM.ttc", "C:\\Windows\\Fonts\\YuGothR.ttc", "C:\\Windows\\Fonts\\meiryo.ttc" };
 		const char* scCandidates[] = { "C:\\Windows\\Fonts\\msyh.ttc", "C:\\Windows\\Fonts\\msyhl.ttc", "C:\\Windows\\Fonts\\simhei.ttf" };
+#else
+		// Common Linux CJK fonts (Fedora / Debian / Arch paths). Droid Fallback covers both scripts.
+		const char* jaCandidates[] = {
+			"/usr/share/fonts/google-droid-sans-fonts/DroidSansFallbackFull.ttf",
+			"/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+			"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+			"/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc" };
+		const char* scCandidates[] = {
+			"/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
+			"/usr/share/fonts/truetype/wqy/wqy-microhei.ttc" };
+#endif
 		const char* jaFont = nullptr;
 		const char* scFont = nullptr;
 		for (const char* p : jaCandidates) { FILE* f = fopen(p, "rb"); if (f) { fclose(f); jaFont = p; break; } }

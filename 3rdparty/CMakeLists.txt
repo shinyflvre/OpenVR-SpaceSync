@@ -47,7 +47,8 @@ add_library(PicoJSON INTERFACE)
 
 target_include_directories(PicoJSON INTERFACE ${PicoJson_ROOT})
 
-# TODO replace MinHook with rtmp or other library when targeting Linux :p
+# Linux hooks the vtable directly (see Hooking.h), so MinHook is Windows only.
+if (WIN32)
 add_library(MinHook STATIC
     ${MinHook_ROOT}/src/hde/hde32.c
 	${MinHook_ROOT}/src/hde/hde64.c
@@ -57,3 +58,4 @@ add_library(MinHook STATIC
 )
 
 target_include_directories(MinHook PUBLIC ${MinHook_ROOT}/include)
+endif ()

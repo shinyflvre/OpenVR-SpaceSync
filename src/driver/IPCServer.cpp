@@ -50,6 +50,138 @@ void IPCServer::HandleRequest(const protocol::Request &request, protocol::Respon
 	}
 }
 
+#ifndef _WIN32
+
+#include <poll.h>
+#include <sys/eventfd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstring>
+#include <vector>
+
+// Linux: a SOCK_SEQPACKET unix socket in the abstract namespace keeps the
+// message framing the Windows named pipe had (one request in, one response out).
+
+IPCServer::~IPCServer()
+{
+	Stop();
+}
+
+void IPCServer::Run()
+{
+	listenFd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
+	if (listenFd < 0)
+	{
+		LOG("IPC socket() failed: %s", strerror(errno));
+		return;
+	}
+
+	sockaddr_un addr = {};
+	addr.sun_family = AF_UNIX;
+	// Leading NUL = abstract namespace: nothing on disk to clean up after a crash.
+	const char name[] = SPACESYNC_SOCKET_NAME;
+	memcpy(addr.sun_path + 1, name, sizeof name - 1);
+	socklen_t len = offsetof(sockaddr_un, sun_path) + 1 + sizeof name - 1;
+
+	if (bind(listenFd, (sockaddr *)&addr, len) != 0 || listen(listenFd, 8) != 0)
+	{
+		LOG("IPC bind/listen failed: %s", strerror(errno));
+		close(listenFd);
+		listenFd = -1;
+		return;
+	}
+
+	wakeFd = eventfd(0, EFD_CLOEXEC);
+	running = true;
+	mainThread = std::thread(RunThread, this);
+}
+
+void IPCServer::Stop()
+{
+	TRACE("IPCServer::Stop()");
+	if (!running)
+		return;
+
+	uint64_t one = 1;
+	if (write(wakeFd, &one, sizeof one) < 0)
+		LOG("IPC wake write failed: %s", strerror(errno));
+	mainThread.join();
+	running = false;
+
+	for (int fd : clients)
+		close(fd);
+	clients.clear();
+	close(listenFd);
+	close(wakeFd);
+	listenFd = wakeFd = -1;
+	TRACE("IPCServer::Stop() finished");
+}
+
+void IPCServer::RunThread(IPCServer *_this)
+{
+	for (;;)
+	{
+		std::vector<pollfd> fds;
+		fds.push_back({ _this->wakeFd, POLLIN, 0 });
+		fds.push_back({ _this->listenFd, POLLIN, 0 });
+		for (int fd : _this->clients)
+			fds.push_back({ fd, POLLIN, 0 });
+
+		if (poll(fds.data(), fds.size(), -1) < 0)
+		{
+			if (errno == EINTR)
+				continue;
+			LOG("IPC poll failed: %s", strerror(errno));
+			return;
+		}
+
+		if (fds[0].revents)
+			return;
+
+		if (fds[1].revents & POLLIN)
+		{
+			int fd = accept4(_this->listenFd, nullptr, nullptr, SOCK_CLOEXEC);
+			if (fd >= 0)
+			{
+				LOG("IPC client connected");
+				_this->clients.insert(fd);
+			}
+		}
+
+		for (size_t i = 2; i < fds.size(); i++)
+		{
+			if (!fds[i].revents)
+				continue;
+
+			int fd = fds[i].fd;
+			protocol::Request request;
+			protocol::Response response;
+			ssize_t n = recv(fd, &request, sizeof request, 0);
+			bool ok = n == (ssize_t)sizeof request;
+			if (ok)
+			{
+				_this->HandleRequest(request, response);
+				ok = send(fd, &response, sizeof response, MSG_NOSIGNAL) == (ssize_t)sizeof response;
+			}
+
+			if (!ok)
+			{
+				if (n == 0)
+					LOG("IPC client disconnecting normally");
+				else
+					LOG("IPC client disconnecting due to error, bytes: %zd, error: %s", n, strerror(errno));
+				close(fd);
+				_this->clients.erase(fd);
+			}
+		}
+	}
+}
+
+#else
+
 IPCServer::~IPCServer()
 {
 	Stop();
@@ -246,3 +378,5 @@ void IPCServer::CompletedWriteCallback(DWORD err, DWORD bytesWritten, LPOVERLAPP
 		pipeInst->server->ClosePipeInstance(pipeInst);
 	}
 }
+
+#endif

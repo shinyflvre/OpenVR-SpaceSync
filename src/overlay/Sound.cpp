@@ -3,9 +3,15 @@
 
 #include "Sound.h"
 
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <mmsystem.h>
+#else
+#include <SDL3/SDL.h>
+#include <atomic>
+#include <unistd.h>
+#endif
 
 #include <condition_variable>
 #include <cstdint>
@@ -38,8 +44,14 @@ namespace sound
 
 		std::string ExeDirectory()
 		{
+#ifdef _WIN32
 			char path[MAX_PATH] = {};
 			DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
+#else
+			char path[4096] = {};
+			ssize_t n = readlink("/proc/self/exe", path, sizeof path - 1);
+			if (n < 0) n = 0;
+#endif
 			std::string s(path, n);
 			size_t slash = s.find_last_of("\\/");
 			return slash == std::string::npos ? "." : s.substr(0, slash);
@@ -108,7 +120,7 @@ namespace sound
 				return it->second.empty() ? nullptr : &it->second;
 
 			std::vector<uint8_t>& buffer = cache[name];
-			std::ifstream file(soundDir + "\\sound\\" + name + ".wav", std::ios::binary);
+			std::ifstream file(soundDir + "/sound/" + name + ".wav", std::ios::binary);
 			if (file)
 			{
 				buffer.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
@@ -116,6 +128,42 @@ namespace sound
 			}
 			return buffer.empty() ? nullptr : &buffer;
 		}
+
+#ifndef _WIN32
+		// PlaySound(SND_MEMORY | SND_SYNC) stand-in: play one in-memory WAV and
+		// return when it has finished, or as soon as Stop() asks us to.
+		std::atomic<bool> abortPlayback{ false };
+
+		void StopPlayback()
+		{
+			abortPlayback = true;
+		}
+
+		void PlayBlocking(const std::vector<uint8_t> &wav)
+		{
+			SDL_IOStream *io = SDL_IOFromConstMem(wav.data(), wav.size());
+			SDL_AudioSpec spec;
+			Uint8 *buf = nullptr;
+			Uint32 len = 0;
+			if (!io || !SDL_LoadWAV_IO(io, true, &spec, &buf, &len))
+				return;
+
+			SDL_AudioStream *stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+			if (stream)
+			{
+				SDL_PutAudioStreamData(stream, buf, (int)len);
+				SDL_FlushAudioStream(stream);
+				SDL_ResumeAudioStreamDevice(stream);
+				while (!abortPlayback && SDL_GetAudioStreamQueued(stream) > 0)
+					SDL_Delay(10);
+				// Let the device drain its own buffer before closing it.
+				if (!abortPlayback)
+					SDL_Delay(80);
+				SDL_DestroyAudioStream(stream);
+			}
+			SDL_free(buf);
+		}
+#endif
 
 		void WorkerLoop()
 		{
@@ -145,7 +193,12 @@ namespace sound
 						continue;
 				}
 
+#ifdef _WIN32
 				PlaySoundA(reinterpret_cast<LPCSTR>(wav->data()), nullptr, SND_MEMORY | SND_SYNC | SND_NODEFAULT);
+#else
+				abortPlayback = false;
+				PlayBlocking(*wav);
+#endif
 			}
 		}
 	}
@@ -156,6 +209,10 @@ namespace sound
 		if (running)
 			return;
 		soundDir = ExeDirectory();
+#ifndef _WIN32
+		if (!SDL_InitSubSystem(SDL_INIT_AUDIO))
+			return;
+#endif
 		running = true;
 		worker = std::thread(WorkerLoop);
 	}
@@ -170,7 +227,11 @@ namespace sound
 			queue.clear();
 		}
 		wake.notify_all();
+#ifdef _WIN32
 		PlaySoundA(nullptr, nullptr, 0);
+#else
+		StopPlayback();
+#endif
 		if (worker.joinable())
 			worker.join();
 	}
@@ -196,6 +257,10 @@ namespace sound
 	void Stop()
 	{
 		ClearQueue();
+#ifdef _WIN32
 		PlaySoundA(nullptr, nullptr, 0);
+#else
+		StopPlayback();
+#endif
 	}
 }

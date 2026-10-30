@@ -745,7 +745,7 @@ void UserInterface::RenderPreview()
 static ImTextureData* LoadImageTexture(const char* file)
 {
 	const char* base = SDL_GetBasePath();
-	std::string path = std::string(base ? base : "") + "images\\" + file;
+	std::string path = std::string(base ? base : "") + "images/" + file;
 	SDL_Surface* loaded = SDL_LoadPNG(path.c_str());
 	if (!loaded)
 		return nullptr;

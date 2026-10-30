@@ -1,0 +1,7 @@
+{
+	"alwaysActivate": true,
+	"name": "spacesync",
+	"directory": "",
+	"resourceOnly": false,
+	"activateOtherDriversWhenEnabled": true
+}
