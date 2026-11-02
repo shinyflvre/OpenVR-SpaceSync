@@ -110,7 +110,7 @@ The installer lands in `dev-resources\SpaceSync_Installer.exe`. Git submodules a
 
 ## Linux
 
-SpaceSync also runs on Linux with native SteamVR (tested on Fedora with a Quest 3 over Steam Link, Index controllers and Vive trackers).
+SpaceSync also runs on Linux with native SteamVR (tested on Fedora with a Quest 3 over Steam Link, Index controllers and Lighthouse trackers).
 The Linux port and the Ukrainian translation were made by [Lokinya](https://github.com/lokinyauv-create) with AI (Claude, Anthropic); see [NOTICE.md](NOTICE.md).
 
 Install (SteamVR must be closed). This builds SpaceSync and installs it for your user, no root needed:
