@@ -82,7 +82,7 @@ If the result feels off, choose a slower calibration speed in Settings and run i
 
 ## Troubleshooting
 
-**View rotated / black borders / hands not in front of me after a tracking hiccup.** Turn on Follow SLAM HMD. If you want to see what happened, look at `spacesync_driver.log` in the SteamVR folder, usually `C:\Program Files (x86)\Steam\steamapps\common\SteamVR\`. Lines starting with `Head tracker:` show tracker state changes, `Drift (SLAM->tracker) changed` shows the relation between the two spaces jumping, and `latency offset` is the learned time offset.
+**View rotated / black borders / hands not in front of me after a tracking hiccup.** Turn on Follow SLAM HMD. If you want to see what happened, look at `spacesync_driver.log` in the SteamVR folder, usually `C:\Program Files (x86)\Steam\steamapps\common\SteamVR\` (on Linux: `~/.local/share/SpaceSync/`). Lines starting with `Head tracker:` show tracker state changes, `Drift (SLAM->tracker) changed` shows the relation between the two spaces jumping, and `latency offset` is the learned time offset.
 
 **Trackers sway when I turn my head fast (follow mode).** Hold still for a second and it should settle. The alignment is averaged over a few seconds of calm head movement, so a moment of standing still is all it needs.
 
@@ -107,6 +107,23 @@ build.bat clean      wipe the build folder first
 ```
 
 The installer lands in `dev-resources\SpaceSync_Installer.exe`. Git submodules are pulled automatically if they are missing.
+
+## Linux
+
+SpaceSync also runs on Linux with native SteamVR (tested on Fedora with a Quest 3 over Steam Link, Index controllers and Lighthouse trackers).
+The Linux port and the Ukrainian translation were made by [Lokinya](https://github.com/lokinyauv-create) with AI (Claude, Anthropic); see [NOTICE.md](NOTICE.md).
+
+Install (SteamVR must be closed). This builds SpaceSync and installs it for your user, no root needed:
+
+```
+sudo dnf install cmake ninja-build gcc-c++ vulkan-loader-devel   # Fedora; use your distro's packages elsewhere
+git submodule update --init --recursive
+linux/install.sh
+```
+
+The installer copies the app to `~/.local/opt/SpaceSync`, registers the driver with SteamVR, adds a menu entry and turns on autolaunch with SteamVR. Because two calibrators moving the same devices fight each other, it switches Space Calibrator's driver off; `~/.local/opt/SpaceSync/uninstall.sh` removes SpaceSync and turns Space Calibrator back on. Running `linux/install.sh` again updates an existing install and keeps your calibration.
+
+On Linux the profile lives in `~/.local/share/SpaceSync/profile.json` and the driver log in `~/.local/share/SpaceSync/spacesync_driver.log`. Powering base stations over Bluetooth is not available on Linux yet.
 
 ## Credits and license
 

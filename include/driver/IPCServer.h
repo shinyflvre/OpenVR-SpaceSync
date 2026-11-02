@@ -8,8 +8,7 @@
 #include <set>
 #include <mutex>
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+#include "Platform.h"
 
 class ServerTrackedDeviceProvider;
 
@@ -25,6 +24,18 @@ public:
 private:
 	void HandleRequest(const protocol::Request &request, protocol::Response &response);
 
+#ifndef _WIN32
+	static void RunThread(IPCServer *_this);
+
+	std::thread mainThread;
+	bool running = false;
+	int listenFd = -1;
+	int wakeFd = -1; // eventfd, poked by Stop()
+	std::set<int> clients;
+
+	ServerTrackedDeviceProvider *driver;
+};
+#else
 	struct PipeInstance
 	{
 		OVERLAPPED overlap; // Used by the API
@@ -53,3 +64,4 @@ private:
 
 	ServerTrackedDeviceProvider *driver;
 };
+#endif

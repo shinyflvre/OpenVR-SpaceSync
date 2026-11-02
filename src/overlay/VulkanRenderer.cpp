@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 #include "VulkanRenderer.h"
+#include <SDL3/SDL_vulkan.h>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -51,6 +53,16 @@ auto VulkanRenderer::Initialize()  -> void
     };
 
     vulkan_instance_extensions_ = GetVulkanInstanceExtensionsRequiredByOpenVR();
+#ifndef _WIN32
+    // The desktop window needs the Wayland/X11 surface extensions, which OpenVR's list never names.
+    {
+        Uint32 count = 0;
+        const char* const* sdl_exts = SDL_Vulkan_GetInstanceExtensions(&count);
+        for (Uint32 i = 0; sdl_exts && i < count; i++)
+            if (std::find(vulkan_instance_extensions_.begin(), vulkan_instance_extensions_.end(), sdl_exts[i]) == vulkan_instance_extensions_.end())
+                vulkan_instance_extensions_.push_back(sdl_exts[i]);
+    }
+#endif
     auto instance_extensions = get_instance_extensions(vulkan_instance_extensions_);
 
 #ifdef ENABLE_VULKAN_VALIDATION

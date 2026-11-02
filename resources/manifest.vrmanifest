@@ -5,6 +5,7 @@
       "app_key": "Shinyflvres.SpaceSync",
       "launch_type": "binary",
       "binary_path_windows": "SpaceSync.exe",
+      "binary_path_linux": "SpaceSync",
       "is_dashboard_overlay": true,
 
       "strings": {

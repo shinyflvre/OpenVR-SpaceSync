@@ -3,13 +3,18 @@
 
 #define _CRT_SECURE_NO_DEPRECATE
 #include "Logging.h"
+#include "Platform.h"
 #include <chrono>
 
 FILE *LogFile;
 
 void OpenLogFile()
 {
+#ifdef _WIN32
 	LogFile = fopen("spacesync_driver.log", "a");
+#else
+	LogFile = fopen((platform::DataDir() + "/spacesync_driver.log").c_str(), "a");
+#endif
 	if (LogFile == nullptr)
 	{
 		LogFile = stderr;

@@ -3,7 +3,13 @@
 #pragma once
 
 #include "Logging.h"
+#ifdef _WIN32
 #include <MinHook.h>
+#else
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
+#include <cstdint>
 #include <map>
 #include <string>
 
@@ -32,6 +38,56 @@ public:
 	FuncType originalFunc = nullptr;
 	Hook(const std::string &name) : IHook(name) { }
 
+#ifndef _WIN32
+	// Linux: no MinHook, so swap the function pointer in the vtable slot itself.
+	// Every object of that class shares the vtable, which is what we want here.
+	bool CreateHookInObjectVTable(void *object, int vtableOffset, void *detourFunction)
+	{
+		void **vtable = *((void ***)object);
+		slot = &vtable[vtableOffset];
+		if (*slot == detourFunction)
+			return false;
+
+		originalFunc = (FuncType)*slot;
+		if (!WriteSlot(detourFunction))
+		{
+			LOG("Failed to make vtable writable for %s", name.c_str());
+			originalFunc = nullptr;
+			slot = nullptr;
+			return false;
+		}
+
+		LOG("Enabled hook for %s", name.c_str());
+		enabled = true;
+		detour = detourFunction;
+		return true;
+	}
+
+	void Destroy()
+	{
+		// Only put the original back if nobody hooked on top of us since.
+		if (enabled && slot && *slot == detour)
+			WriteSlot((void *)originalFunc);
+		enabled = false;
+	}
+
+private:
+	bool WriteSlot(void *value)
+	{
+		long page = sysconf(_SC_PAGESIZE);
+		void *start = (void *)((uintptr_t)slot & ~(uintptr_t)(page - 1));
+		// The slot may straddle a page boundary, so unprotect two pages.
+		if (mprotect(start, page * 2, PROT_READ | PROT_WRITE) != 0)
+			return false;
+		*slot = value;
+		mprotect(start, page * 2, PROT_READ);
+		return true;
+	}
+
+	void **slot = nullptr;
+	void *detour = nullptr;
+	bool enabled = false;
+#else
 	bool CreateHookInObjectVTable(void *object, int vtableOffset, void *detourFunction)
 	{
 		// For virtual objects, VC++ adds a pointer to the vtable as the first member.
@@ -74,4 +130,5 @@ public:
 private:
 	bool enabled = false;
 	void* targetFunc = nullptr;
+#endif
 };

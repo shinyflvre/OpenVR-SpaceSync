@@ -31,3 +31,22 @@ Starting point was OpenVR-SpaceOverride commit `6604e42`. Since then:
 
 Every source file I touched or added has a "Modified by" or "Added by" line under its SPDX header.
 The full history is in this repo's git log.
+
+## Linux port (Lokinya)
+
+The Linux port of SpaceSync and the Ukrainian translation were made by Lokinya (https://github.com/lokinyauv-create),
+beginning on 2026-10-30. The code and translation were generated with AI (Claude, Anthropic) and tested by Lokinya. It stays AGPL-3.0-only.
+All of the calibration, alignment, smoothing and base station lock logic is SpaceSync's, unchanged.
+The Windows code paths are kept as they were, behind `#ifdef _WIN32`.
+
+- Driver: vtable-slot hooks instead of MinHook, an abstract unix socket instead of the named pipe,
+  small Win32 stand-ins in `include/shared/Platform.h`, log file in `~/.local/share/SpaceSync`.
+- Overlay: unix socket IPC client, profile in `~/.local/share/SpaceSync/profile.json` instead of the
+  registry, single instance via `flock`, SteamVR handover, SDL3 audio for the voice cues, Linux paths
+  and CJK fonts, Wayland/X11 Vulkan surface extensions.
+- Base station power over Bluetooth is not available on Linux yet (`src/overlay/Lighthouse_linux.cpp` stub).
+- Ukrainian language: all UI strings (`src/overlay/Localization_uk.inc`), Ukrainian voice cues in
+  `src/sound/uk` (generated with Microsoft Edge TTS, voice uk-UA-PolinaNeural), Cyrillic glyphs from the
+  Manrope and JetBrains Mono fonts in `resources/fonts` (SIL OFL 1.1, licences included).
+- `linux/install.sh` and `linux/uninstall.sh`: per-user install, driver registration, and Space Calibrator
+  switched off while SpaceSync is installed (restored on uninstall).

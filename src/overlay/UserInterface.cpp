@@ -357,13 +357,13 @@ UserInterface::WindowAction UserInterface::RenderTitleBar()
 	DrawText(dl, F.semibold, 12.5f, ImVec2(px(14.0f), (h - ts.y) * 0.5f), P.textTitle, "SpaceSync");
 
 	{
-		static const char* kLangNames[3] = { "English", "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E", "\xE4\xB8\xAD\xE6\x96\x87" };
+		static const char* kLangNames[loc::kLangCount] = { "English", "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E", "\xE4\xB8\xAD\xE6\x96\x87", "\xD0\xA3\xD0\xBA\xD1\x80\xD0\xB0\xD1\x97\xD0\xBD\xD1\x81\xD1\x8C\xD0\xBA\xD0\xB0" };
 		float lx = px(14.0f) + ts.x + px(10.0f);
 		ImVec2 ds = TextSize(F.regular, 12.0f, "-");
 		DrawText(dl, F.regular, 12.0f, ImVec2(lx, (h - ds.y) * 0.5f), P.textFooter, "-");
 		lx += ds.x + px(10.0f);
 		sLangZoneMinX = lx - px(4.0f);
-		for (int i = 0; i < 3; i++)
+		for (int i = 0; i < loc::kLangCount; i++)
 		{
 			ImVec2 ns = TextSize(F.medium, 12.0f, kLangNames[i]);
 			char id[16];
@@ -379,10 +379,11 @@ UserInterface::WindowAction UserInterface::RenderTitleBar()
 				loc::SetLanguage((loc::Lang)i);
 				CalCtx.language = i;
 				SaveProfile(CalCtx);
+				SaveLanguage(CalCtx);
 			}
 			DrawText(dl, active ? F.semibold : F.medium, 12.0f, ImVec2(lx, (h - ns.y) * 0.5f), active ? P.textStrong : (langHovered ? P.textTitle : P.textFooter), kLangNames[i]);
 			lx += ns.x + px(8.0f);
-			if (i < 2)
+			if (i < loc::kLangCount - 1)
 			{
 				ImVec2 ss = TextSize(F.regular, 12.0f, "|");
 				DrawText(dl, F.regular, 12.0f, ImVec2(lx, (h - ss.y) * 0.5f), P.textFooter, "|");
@@ -745,7 +746,7 @@ void UserInterface::RenderPreview()
 static ImTextureData* LoadImageTexture(const char* file)
 {
 	const char* base = SDL_GetBasePath();
-	std::string path = std::string(base ? base : "") + "images\\" + file;
+	std::string path = std::string(base ? base : "") + "images/" + file;
 	SDL_Surface* loaded = SDL_LoadPNG(path.c_str());
 	if (!loaded)
 		return nullptr;

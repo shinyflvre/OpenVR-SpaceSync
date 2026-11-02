@@ -6,7 +6,7 @@
 #include "PoseMath.h"
 
 #include <openvr_driver.h>
-#include <windows.h>
+#include "Platform.h"
 
 #include <cstdio>
 #include <deque>

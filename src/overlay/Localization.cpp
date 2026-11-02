@@ -258,8 +258,19 @@ namespace loc
 			{ "HMD Scale", "HMD スケール", "头显缩放" },
 		};
 
+		struct UkEntry
+		{
+			const char* en;
+			const char* uk;
+		};
+
+		const UkEntry kTableUk[] = {
+#include "Localization_uk.inc"
+		};
+
 		Lang g_lang = Lang::English;
 		std::unordered_map<std::string, const Entry*> g_index;
+		std::unordered_map<std::string, const char*> g_indexUk;
 
 		void BuildIndex()
 		{
@@ -267,6 +278,8 @@ namespace loc
 				return;
 			for (const Entry& e : kTable)
 				g_index[e.en] = &e;
+			for (const UkEntry& e : kTableUk)
+				g_indexUk[e.en] = e.uk;
 		}
 	}
 
@@ -287,6 +300,11 @@ namespace loc
 		if (english[0] == '#' && english[1] == '#')
 			return english;
 		BuildIndex();
+		if (g_lang == Lang::Ukrainian)
+		{
+			auto uk = g_indexUk.find(english);
+			return uk != g_indexUk.end() && *uk->second ? uk->second : english;
+		}
 		auto it = g_index.find(english);
 		if (it == g_index.end())
 			return english;

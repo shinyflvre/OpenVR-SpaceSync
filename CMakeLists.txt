@@ -39,11 +39,17 @@ add_executable(SpaceSync
     "src/overlay/UserInterface.cpp"
     "src/overlay/Theme.cpp"
     "src/overlay/TrackingPreview.cpp"
-    "src/overlay/Lighthouse.cpp"
     "src/overlay/Localization.cpp"
     "src/overlay/Sound.cpp"
     "src/overlay/EmbeddedFiles.cpp"
 )
+
+# Base station power over Bluetooth uses WinRT; Linux gets a stub for now.
+if (WIN32)
+    target_sources(SpaceSync PRIVATE "src/overlay/Lighthouse.cpp")
+else ()
+    target_sources(SpaceSync PRIVATE "src/overlay/Lighthouse_linux.cpp")
+endif ()
 
 target_compile_features(SpaceSync PUBLIC cxx_std_20)
 
@@ -65,6 +71,9 @@ endif()
 
 if (MSVC)
     target_compile_options(SpaceSync PRIVATE /bigobj)
+else ()
+    # The bundled Eigen predates GCC 14's stricter template checks.
+    target_compile_options(SpaceSync PRIVATE -Wno-template-body)
 endif()
 
 # Windows executable icon
@@ -79,9 +88,14 @@ target_link_libraries(SpaceSync
         ImGui
         Eigen
         PicoJSON
-        winmm
-        windowsapp
 )
+
+if (WIN32)
+    target_link_libraries(SpaceSync PRIVATE winmm windowsapp)
+else ()
+    # Run next to our own libopenvr_api.so.
+    set_target_properties(SpaceSync PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
+endif ()
 
 if (WIN32)
     set_target_properties(SpaceSync PROPERTIES WIN32_EXECUTABLE TRUE)
@@ -106,10 +120,13 @@ target_include_directories(driver_spacesync PRIVATE
     "${CMAKE_SOURCE_DIR}/include/shared"
 )
 
-target_link_libraries(driver_spacesync PRIVATE
-    OpenVR::Driver
-    MinHook
-)
+target_link_libraries(driver_spacesync PRIVATE OpenVR::Driver)
+if (WIN32)
+    target_link_libraries(driver_spacesync PRIVATE MinHook)
+else ()
+    # Hide everything except HmdDriverFactory so we never clash with other drivers' symbols.
+    set_target_properties(driver_spacesync PROPERTIES CXX_VISIBILITY_PRESET hidden)
+endif ()
 
 set_property(TARGET driver_spacesync PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")
 set_target_properties(driver_spacesync PROPERTIES PREFIX "")

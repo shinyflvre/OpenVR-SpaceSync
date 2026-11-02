@@ -53,7 +53,7 @@ static void *DetourGetGenericInterface(void* _this, const char *pchInterfaceVers
 	{
 		if (!IHook::Exists(TrackedDevicePoseUpdatedHook005.name))
 		{
-			TrackedDevicePoseUpdatedHook005.CreateHookInObjectVTable(originalInterface, 1, &DetourTrackedDevicePoseUpdated005);
+			TrackedDevicePoseUpdatedHook005.CreateHookInObjectVTable(originalInterface, 1, (void *)&DetourTrackedDevicePoseUpdated005);
 			IHook::Register(&TrackedDevicePoseUpdatedHook005);
 		}
 	}
@@ -61,7 +61,7 @@ static void *DetourGetGenericInterface(void* _this, const char *pchInterfaceVers
 	{
 		if (!IHook::Exists(TrackedDevicePoseUpdatedHook006.name))
 		{
-			TrackedDevicePoseUpdatedHook006.CreateHookInObjectVTable(originalInterface, 1, &DetourTrackedDevicePoseUpdated006);
+			TrackedDevicePoseUpdatedHook006.CreateHookInObjectVTable(originalInterface, 1, (void *)&DetourTrackedDevicePoseUpdated006);
 			IHook::Register(&TrackedDevicePoseUpdatedHook006); 
 		}
 	}
@@ -71,20 +71,35 @@ static void *DetourGetGenericInterface(void* _this, const char *pchInterfaceVers
 
 void InjectHooks(vr::IVRDriverContext *pDriverContext)
 {
+#ifndef _WIN32
+	GetGenericInterfaceHook.CreateHookInObjectVTable(pDriverContext, 0, (void *)&DetourGetGenericInterface);
+	IHook::Register(&GetGenericInterfaceHook);
+
+	// Our own host was fetched before the hook above existed. All drivers share the
+	// host's vtable, so hooking it here covers drivers that loaded before us too.
+	if (vr::VRServerDriverHost() && !IHook::Exists(TrackedDevicePoseUpdatedHook006.name))
+	{
+		if (TrackedDevicePoseUpdatedHook006.CreateHookInObjectVTable(vr::VRServerDriverHost(), 1, (void *)&DetourTrackedDevicePoseUpdated006))
+			IHook::Register(&TrackedDevicePoseUpdatedHook006);
+	}
+#else
 	auto err = MH_Initialize();
 	if (err == MH_OK)
 	{
-		GetGenericInterfaceHook.CreateHookInObjectVTable(pDriverContext, 0, &DetourGetGenericInterface);
+		GetGenericInterfaceHook.CreateHookInObjectVTable(pDriverContext, 0, (void *)&DetourGetGenericInterface);
 		IHook::Register(&GetGenericInterfaceHook);
 	}
 	else
 	{
 		LOG("MH_Initialize error: %s", MH_StatusToString(err));
 	}
+#endif
 }
 
 void DisableHooks()
 {
 	IHook::DestroyAll();
+#ifdef _WIN32
 	MH_Uninitialize();
+#endif
 }
