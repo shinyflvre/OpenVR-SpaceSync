@@ -34,8 +34,8 @@ The full history is in this repo's git log.
 
 ## Linux port (Lokinya)
 
-The `linux-port` branch is a Linux port of SpaceSync made by Lokinya (https://github.com/lokinyauv-create),
-beginning on 2026-10-30. The work was done with AI assistance (Claude, Anthropic). It stays AGPL-3.0-only.
+The Linux port of SpaceSync and the Ukrainian translation were made by Lokinya (https://github.com/lokinyauv-create),
+beginning on 2026-10-30. The code and translation were generated with AI (Claude, Anthropic) and tested by Lokinya. It stays AGPL-3.0-only.
 All of the calibration, alignment, smoothing and base station lock logic is SpaceSync's, unchanged.
 The Windows code paths are kept as they were, behind `#ifdef _WIN32`.
 
