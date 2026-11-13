@@ -1566,7 +1566,7 @@ void CalibrationTick(double time)
 			if (!ctx.devicePoses[id].bPoseIsValid)
 				continue;
 
-			if (GetDeviceTrackingSystem(id) == hmdSystem)
+			if (!ctx.allowSameSpaceCalibration && GetDeviceTrackingSystem(id) == hmdSystem)
 				continue;
 
 			Detection.candidates.push_back(id);
@@ -1575,7 +1575,14 @@ void CalibrationTick(double time)
 		if (Detection.candidates.empty())
 		{
 			ctx.state = CalibrationState::None;
-			if (ctx.noHeadTracker)
+			if (ctx.allowSameSpaceCalibration)
+			{
+				if (ctx.noHeadTracker)
+					CalCtx.Log("No tracker or controller detected, aborting! Turn on the device you want to hold against your head.\n");
+				else
+					CalCtx.Log("No trackers detected, aborting! Turn on the tracker you want to mount on your head.\n");
+			}
+			else if (ctx.noHeadTracker)
 				CalCtx.Log("No tracker or controller from a different tracking system detected, aborting! Turn on the device you want to hold against your head.\n");
 			else
 				CalCtx.Log("No trackers from a different tracking system detected, aborting!\n");
