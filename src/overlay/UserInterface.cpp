@@ -813,17 +813,19 @@ void UserInterface::RenderLighthouse()
 	VSpace(18.0f);
 
 	if (CheckboxRow("Basestation Management",
-		"SpaceSync connects to your basestations over Bluetooth to show and switch their power state. Turn this off if you manage your basestations with another tool.",
+		"SpaceSync connects to your basestations over Bluetooth LE to show and switch their power state. Turn this off if another tool (for example Oyasumi) already controls your basestations, or if the Bluetooth scanning interferes with other BLE devices such as a heart rate monitor used by HRtoOSC.",
 		&CalCtx.basestationManagement, maxW))
 	{
 		lighthouse::SetManaged(CalCtx.basestationManagement);
+		if (!CalCtx.basestationManagement)
+			lighthouse::SetAutoWake(false);
 		SaveProfile(CalCtx);
 	}
 
 	if (!CalCtx.basestationManagement)
 	{
 		VSpace(12.0f);
-		TextWrapped(F.regular, 12.5f, P.textDim, maxW, "Basestation management is off. SpaceSync does not connect to your basestations over Bluetooth.");
+		TextWrapped(F.regular, 12.5f, P.textDim, maxW, "Basestation management is off. SpaceSync does not scan for or connect to any Bluetooth LE devices, so it will not conflict with tools like Oyasumi or HRtoOSC.");
 		return;
 	}
 
@@ -1191,6 +1193,10 @@ void UserInterface::RenderSettings()
 	CheckboxRow("Enable Angular Velocity",
 		"Passes the tracker's angular velocity through to SteamVR. Off by default, it can cause issues with some devices.",
 		&CalCtx.enableAngularVelocity, colW);
+	if (CheckboxRow("Allow Same Tracking Space",
+		"Normally calibration requires the head tracker to come from a different tracking system than the headset. Turn this on if you want to use a lighthouse tracker as the head tracker for a lighthouse headset (e.g. Vive Tracker + Valve Index). Only enable this if you know what you are doing.",
+		&CalCtx.allowSameSpaceCalibration, colW))
+		SaveProfile(CalCtx);
 	CheckboxRow("Relative Calibration",
 		"Continuously re-aligns SLAM-tracked devices (controllers etc.) to the calibrated space by comparing the headset's SLAM pose with the tracker-driven pose.",
 		&CalCtx.continuousSync, colW);

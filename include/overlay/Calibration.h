@@ -80,6 +80,7 @@ struct CalibrationContext
 	bool dynamicBasestationPower = false;
 	int dynamicPowerMode = 0;
 	bool basestationManagement = true;
+	bool allowSameSpaceCalibration = false;
 	bool disableVoiceHelp = false;
 	int language = 0;
 
