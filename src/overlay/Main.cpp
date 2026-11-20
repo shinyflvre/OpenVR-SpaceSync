@@ -496,7 +496,7 @@ int main(int argc, char** argv)
     }
 
     lighthouse::SetManaged(CalCtx.basestationManagement);
-    if (!g_desktopForced && CalCtx.dynamicBasestationPower)
+    if (!g_desktopForced && CalCtx.basestationManagement && CalCtx.dynamicBasestationPower)
         lighthouse::SetAutoWake(true);
     lighthouse::EnsureScanning();
 

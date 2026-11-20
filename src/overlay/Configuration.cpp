@@ -132,6 +132,11 @@ static void ParseProfile(CalibrationContext &ctx, std::istream &stream)
 	else
 		ctx.basestationManagement = true;
 
+	if (obj["allowSameSpaceCal"].is<bool>())
+		ctx.allowSameSpaceCalibration = obj["allowSameSpaceCal"].get<bool>();
+	else
+		ctx.allowSameSpaceCalibration = false;
+
 	if (obj["lhSmoothing"].is<double>())
 	{
 		ctx.lighthouseSmoothing = obj["lhSmoothing"].get<double>();
@@ -316,6 +321,7 @@ static void WriteProfile(CalibrationContext &ctx, std::ostream &out)
 	double dynPowerMode = (double)ctx.dynamicPowerMode;
 	profile["dynPowerMode"].set<double>(dynPowerMode);
 	profile["bsManagement"].set<bool>(ctx.basestationManagement);
+	profile["allowSameSpaceCal"].set<bool>(ctx.allowSameSpaceCalibration);
 	double lhSmoothing = ctx.lighthouseSmoothing;
 	profile["lhSmoothing"].set<double>(lhSmoothing);
 	double latencyComp = ctx.latencyCompensation;
