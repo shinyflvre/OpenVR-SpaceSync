@@ -1470,7 +1470,18 @@ void UserInterface::RenderWizard()
 		// --- body ---
 		{
 			const bool hasMessage = (failed || (running && st == CalibrationState::Sampling && !lastLine.empty() && lastLine.find("samples") != std::string::npos));
-			float bodyH = px(34.0f + 44.0f + 20.0f + 19.0f + 26.0f + 3.0f + 30.0f) + (hasMessage ? px(10.0f + 12.0f) : 0.0f);
+
+			// Wrap the status/error line to the progress-bar band so long messages
+			// (e.g. "Calibration quality is too low, ...") stay on-screen.
+			const float wrapW = px(w - 48.0f);
+			ImFont* msgFont = F.regular;
+			const float msgFs = FontPx(12.0f);
+			float msgH = 0.0f;
+			if (hasMessage)
+				msgH = msgFont->CalcTextSizeA(msgFs, FLT_MAX, wrapW, loc::tr(lastLine.c_str())).y;
+
+			float bodyH = px(34.0f + 44.0f + 20.0f + 19.0f + 26.0f + 3.0f + 30.0f)
+				+ (hasMessage ? (px(10.0f) + msgH + px(12.0f)) : 0.0f);
 			ImVec2 p = ImGui::GetCursorScreenPos();
 			ImGui::Dummy(ImVec2(ww, bodyH));
 			float cx = p.x + ww * 0.5f;
@@ -1487,7 +1498,9 @@ void UserInterface::RenderWizard()
 			if (hasMessage)
 			{
 				y += px(10.0f);
-				DrawTextCentered(dl, F.regular, 12.0f, ImVec2(cx, y + px(6.0f)), failed ? P.danger : P.textDim, lastLine.c_str());
+				dl->AddText(msgFont, msgFs, ImVec2(bx0, std::floor(y + px(6.0f) + 0.5f)),
+					Col(failed ? P.danger : P.textDim), loc::tr(lastLine.c_str()),
+					nullptr, bx1 - bx0);
 			}
 		}
 
