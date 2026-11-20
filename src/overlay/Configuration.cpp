@@ -242,6 +242,11 @@ static void ParseProfile(CalibrationContext &ctx, std::istream &stream)
 	ctx.tiltSessionEntry = -1;
 	ctx.tiltStepsRecorded = 0;
 
+	// Settings-only profiles (saved before the user completes calibration) are tagged with
+	// validProfile=false so we restore their options without pretending calibration is done.
+	// Legacy profiles predate this flag, so default to true for backward compat.
+	bool savedValidProfile = obj["validProfile"].is<bool>() ? obj["validProfile"].get<bool>() : true;
+
 	if (obj["chaperone"].is<picojson::object>())
 	{
 		auto chaperone = obj["chaperone"].get<picojson::object>();
@@ -269,15 +274,13 @@ static void ParseProfile(CalibrationContext &ctx, std::istream &stream)
 		}
 	}
 
-	ctx.validProfile = true;
+	ctx.validProfile = savedValidProfile;
 }
 
 static void WriteProfile(CalibrationContext &ctx, std::ostream &out)
 {
-	if (!ctx.validProfile)
-		return;
-
 	picojson::object profile;
+	profile["validProfile"].set<bool>(ctx.validProfile);
 	profile["target_tracking_system"].set<std::string>(ctx.targetTrackingSystem);
 	profile["hmd_serial"].set<std::string>(ctx.hmdSerial);
 	profile["tracker_serial"].set<std::string>(ctx.trackerSerial);
@@ -486,9 +489,15 @@ void LoadProfile(CalibrationContext &ctx)
 
 void SaveProfile(CalibrationContext &ctx)
 {
-	std::cout << "Saving profile to registry" << std::endl;
-
 	std::stringstream io;
 	WriteProfile(ctx, io);
-	WriteRegistryKey(io.str());
+	std::string serialized = io.str();
+	if (serialized.empty())
+	{
+		// Never clobber an existing registry value with an empty payload.
+		std::cout << "Skipping save: profile serialization produced no data" << std::endl;
+		return;
+	}
+	std::cout << "Saving profile to registry" << std::endl;
+	WriteRegistryKey(serialized);
 }
