@@ -1046,6 +1046,8 @@ bool ServerTrackedDeviceProvider::HandleDevicePoseUpdated(uint32_t openVRID, vr:
 		QueryPerformanceCounter(&probeNow);
 		double probeSeconds = QpcSeconds(probeNow);
 		universeProbe.onPose(openVRID, pose, probeSeconds, hmdTracker.hmdID);
+		if (openVRID == hmdTracker.hmdID)
+			universeProbe.checkUniverseChange(hmdTracker.hmdID, probeSeconds);
 		universe::Summary sum;
 		if (openVRID == hmdTracker.hmdID && universeProbe.takeSummary(sum, probeSeconds))
 			LOG("Universe probe (last minute): base station updates %u, base moves %u, device frame changes %u (universe jumps %u, reference switches %u of which inconsistent %u, unmatched %u), capture windows %u",

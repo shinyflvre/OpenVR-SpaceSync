@@ -65,6 +65,53 @@ namespace universe
 			return true;
 		}
 
+		// Public universe-id check — polls Prop_CurrentUniverseId_Uint64 on the
+		// HMD, logs transitions, and triggers a 2-s capture on the exact tick
+		// of the change. Call at ~1 Hz from the HMD-pose path; cheap property
+		// read, no scanning. Returns the (new) universe id.
+		//
+		// Why we trust this: in SteamVR 2.x, drivers write their current
+		// universe into this standard tracked-device property each time they
+		// select/create a universe (see docs/steamvr-re-session.md §2.2). It
+		// is the public signal that corresponds to lighthouse's internal
+		// "Selected existing universe" / "Creating new universe" log lines.
+		uint64_t checkUniverseChange(uint32_t hmdId, double now)
+		{
+			if (hmdId >= vr::k_unMaxTrackedDeviceCount)
+				return lastUniverseId;
+			if (now - lastUniverseCheck < 1.0)
+				return lastUniverseId;
+			lastUniverseCheck = now;
+			vr::ETrackedPropertyError err = vr::TrackedProp_Success;
+			uint64_t current = vr::VRSystem()->GetUint64TrackedDeviceProperty(
+				hmdId, vr::Prop_CurrentUniverseId_Uint64, &err);
+			if (err != vr::TrackedProp_Success)
+				return lastUniverseId;
+
+			std::lock_guard<std::mutex> lock(mutex);
+			if (!ensureOpen())
+			{
+				lastUniverseId = current;
+				return current;
+			}
+			if (!universeIdSeeded)
+			{
+				universeIdSeeded = true;
+				lastUniverseId = current;
+				line("UNIVERSE id=%llu (initial, from HMD Prop_CurrentUniverseId_Uint64)",
+					(unsigned long long)current);
+				return current;
+			}
+			if (current != lastUniverseId)
+			{
+				line("UNIVERSE id changed %llu -> %llu (from HMD Prop_CurrentUniverseId_Uint64)",
+					(unsigned long long)lastUniverseId, (unsigned long long)current);
+				lastUniverseId = current;
+				startCapture(now, "universe-id", hmdId);
+			}
+			return current;
+		}
+
 		void onPose(uint32_t id, const vr::DriverPose_t& pose, double now, uint32_t hmdID)
 		{
 			if (id >= vr::k_unMaxTrackedDeviceCount)
@@ -130,6 +177,9 @@ namespace universe
 		double captureUntil = -1.0;
 		double lastSummary = 0.0;
 		Summary minute;
+		uint64_t lastUniverseId = 0;
+		double lastUniverseCheck = -1e9;
+		bool universeIdSeeded = false;
 
 		bool ensureOpen()
 		{
