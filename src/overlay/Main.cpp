@@ -605,6 +605,22 @@ int main(int argc, char** argv)
                 BeginClose();
                 break;
             }
+            else if (sys_event.eventType == vr::VREvent_ChaperoneDataHasChanged
+                  || sys_event.eventType == vr::VREvent_ChaperoneUniverseHasChanged
+                  || sys_event.eventType == vr::VREvent_ChaperoneSettingsHaveChanged)
+            {
+                // Re-fetch bounds + standing zero pose so overlays reading
+                // CalCtx.chaperone see the new playspace immediately. SteamVR
+                // emits this on room-setup save, universe switch, and roomscale
+                // vs standing changes.
+                LoadChaperoneBounds();
+                lighthouse::Note(
+                    sys_event.eventType == vr::VREvent_ChaperoneUniverseHasChanged
+                        ? "chaperone: universe changed, bounds reloaded"
+                    : sys_event.eventType == vr::VREvent_ChaperoneSettingsHaveChanged
+                        ? "chaperone: settings changed, bounds reloaded"
+                        : "chaperone: bounds changed, reloaded");
+            }
         }
 
         while (!g_desktopPreview && g_overlay->Handle() != vr::k_ulOverlayHandleInvalid && vr::VROverlay()->PollNextOverlayEvent(g_overlay->Handle(), &vr_event, sizeof(vr_event)))
