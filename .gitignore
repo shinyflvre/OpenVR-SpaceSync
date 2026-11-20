@@ -46,3 +46,6 @@ bin/icon.png
 bin/manifest.vrmanifest
 bin/NOTICE.md
 
+
+# macOS
+.DS_Store

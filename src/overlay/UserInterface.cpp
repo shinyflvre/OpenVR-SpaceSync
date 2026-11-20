@@ -357,13 +357,13 @@ UserInterface::WindowAction UserInterface::RenderTitleBar()
 	DrawText(dl, F.semibold, 12.5f, ImVec2(px(14.0f), (h - ts.y) * 0.5f), P.textTitle, "SpaceSync");
 
 	{
-		static const char* kLangNames[3] = { "English", "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E", "\xE4\xB8\xAD\xE6\x96\x87" };
+		static const char* kLangNames[4] = { "English", "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E", "\xE4\xB8\xAD\xE6\x96\x87", "\xED\x95\x9C\xEA\xB5\xAD\xEC\x96\xB4" };
 		float lx = px(14.0f) + ts.x + px(10.0f);
 		ImVec2 ds = TextSize(F.regular, 12.0f, "-");
 		DrawText(dl, F.regular, 12.0f, ImVec2(lx, (h - ds.y) * 0.5f), P.textFooter, "-");
 		lx += ds.x + px(10.0f);
 		sLangZoneMinX = lx - px(4.0f);
-		for (int i = 0; i < 3; i++)
+		for (int i = 0; i < 4; i++)
 		{
 			ImVec2 ns = TextSize(F.medium, 12.0f, kLangNames[i]);
 			char id[16];
@@ -382,7 +382,7 @@ UserInterface::WindowAction UserInterface::RenderTitleBar()
 			}
 			DrawText(dl, active ? F.semibold : F.medium, 12.0f, ImVec2(lx, (h - ns.y) * 0.5f), active ? P.textStrong : (langHovered ? P.textTitle : P.textFooter), kLangNames[i]);
 			lx += ns.x + px(8.0f);
-			if (i < 2)
+			if (i < 3)
 			{
 				ImVec2 ss = TextSize(F.regular, 12.0f, "|");
 				DrawText(dl, F.regular, 12.0f, ImVec2(lx, (h - ss.y) * 0.5f), P.textFooter, "|");
