@@ -677,6 +677,7 @@ int main(int argc, char** argv)
         }
 
         const double time = static_cast<double>(SDL_GetTicks()) / 1000.0;
+        UpdateOpenHouseDetection(time);
         if (!g_desktopPreview)
         {
             try {

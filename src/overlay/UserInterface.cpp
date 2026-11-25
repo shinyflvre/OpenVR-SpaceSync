@@ -1231,15 +1231,22 @@ void UserInterface::RenderSettings()
 		}
 		VSpace(6.0f);
 	}
-	if (CheckboxRow("Lock Base Stations",
-		"Keeps your base stations where they were when you calibrated. SteamVR sometimes moves base stations by mistake (for example after a tracker loses tracking or the headset wakes from standby), which makes your hands, feet or the whole view jump. Works in all modes. If you really move a base station, just calibrate again.",
-		&CalCtx.lockBaseStations, colW))
+	const char* lockHint = "Keeps your base stations where they were when you calibrated. SteamVR sometimes moves base stations by mistake (for example after a tracker loses tracking or the headset wakes from standby), which makes your hands, feet or the whole view jump. Works in all modes. If you really move a base station, just calibrate again.";
+	if (CalCtx.openHouse)
+	{
+		bool lockOff = false;
+		CheckboxRow("Lock Base Stations", lockHint, &lockOff, colW, false);
+		VSpace(6.0f);
+		Hint("OpenHouse is installed and takes care of your base stations itself, so Lock Base Stations is not needed and stays off.", colW);
+		VSpace(6.0f);
+	}
+	else if (CheckboxRow("Lock Base Stations", lockHint, &CalCtx.lockBaseStations, colW))
 	{
 		SendUniverseLock();
 		if (CalCtx.validProfile)
 			SaveProfile(CalCtx);
 	}
-	if (CalCtx.lockBaseStations)
+	if (CalCtx.lockBaseStations && !CalCtx.openHouse)
 	{
 		const auto& st = CalCtx.driverStatus;
 		VSpace(6.0f);

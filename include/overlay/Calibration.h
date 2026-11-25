@@ -68,6 +68,8 @@ struct CalibrationContext
 	bool hideHeadTracker = true;
 	bool stayAligned = false;
 	bool lockBaseStations = false;
+	bool openHouse = false;
+	double timeLastOpenHouseCheck = -1e9;
 	bool lockCommitPending = false;
 	float predictionTime = 1.0f;
 	float uiScale = 1.25f;            // UI content scale
@@ -204,6 +206,7 @@ extern CalibrationContext CalCtx;
 void InitCalibrator();
 bool DriverConnected();
 void CalibrationTick(double time);
+void UpdateOpenHouseDetection(double time);
 void StartCalibration();
 void CancelCalibration();   // abort a running calibration, restore the saved profile
 void LoadChaperoneBounds();

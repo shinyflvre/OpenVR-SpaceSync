@@ -17,8 +17,13 @@
 #include <cstdlib>
 #include <map>
 #include <sstream>
+#include <cwctype>
 
 #include <Dense>
+
+#include <windows.h>
+
+#pragma comment(lib, "Version.lib")
 
 
 static IPCClient Driver;
@@ -680,10 +685,73 @@ void SendOneEuroParams()
 	}
 }
 
+static bool VersionStringContains(const std::vector<BYTE>& info, WORD language, WORD codepage, const wchar_t* field, const wchar_t* needle)
+{
+	wchar_t key[96];
+	swprintf(key, 96, L"\\StringFileInfo\\%04x%04x\\%ls", language, codepage, field);
+	LPVOID value = nullptr;
+	UINT length = 0;
+	if (!VerQueryValueW(info.data(), key, &value, &length) || !value || length == 0)
+		return false;
+	std::wstring text((const wchar_t*)value);
+	std::transform(text.begin(), text.end(), text.begin(), [](wchar_t c) { return (wchar_t)towlower(c); });
+	return text.find(needle) != std::wstring::npos;
+}
+
+static bool DetectOpenHouse()
+{
+	char runtime[MAX_PATH * 2] = {};
+	uint32_t needed = 0;
+	if (!vr::VR_GetRuntimePath(runtime, sizeof runtime, &needed) || !runtime[0])
+		return false;
+	std::string path = std::string(runtime) + "\\drivers\\lighthouse\\bin\\win64\\driver_lighthouse.dll";
+	int wide = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+	if (wide <= 0)
+		return false;
+	std::wstring widePath((size_t)wide, L'\0');
+	MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, &widePath[0], wide);
+	DWORD handle = 0;
+	DWORD size = GetFileVersionInfoSizeW(widePath.c_str(), &handle);
+	if (size == 0)
+		return false;
+	std::vector<BYTE> info(size);
+	if (!GetFileVersionInfoW(widePath.c_str(), 0, size, info.data()))
+		return false;
+	struct LangCodepage { WORD language; WORD codepage; };
+	LangCodepage* translations = nullptr;
+	UINT bytes = 0;
+	if (VerQueryValueW(info.data(), L"\\VarFileInfo\\Translation", (LPVOID*)&translations, &bytes) && translations)
+	{
+		for (UINT i = 0; i < bytes / sizeof(LangCodepage); i++)
+		{
+			if (VersionStringContains(info, translations[i].language, translations[i].codepage, L"ProductName", L"openhouse") ||
+				VersionStringContains(info, translations[i].language, translations[i].codepage, L"FileDescription", L"openhouse"))
+				return true;
+		}
+	}
+	return VersionStringContains(info, 0x0409, 0x04b0, L"ProductName", L"openhouse") ||
+		VersionStringContains(info, 0x0409, 0x04b0, L"FileDescription", L"openhouse");
+}
+
+void UpdateOpenHouseDetection(double time)
+{
+	auto& ctx = CalCtx;
+	if (time - ctx.timeLastOpenHouseCheck < 10.0)
+		return;
+	ctx.timeLastOpenHouseCheck = time;
+	bool detected = DetectOpenHouse();
+	if (detected == ctx.openHouse)
+		return;
+	ctx.openHouse = detected;
+	std::cout << (detected ? "OpenHouse lighthouse driver detected, it manages the base stations" : "OpenHouse lighthouse driver not active") << std::endl;
+	if (Driver.IsConnected())
+		SendUniverseLock();
+}
+
 void SendUniverseLock()
 {
 	protocol::Request req(protocol::RequestSetUniverseLock);
-	req.setUniverseLock.enabled = CalCtx.lockBaseStations;
+	req.setUniverseLock.enabled = CalCtx.lockBaseStations && !CalCtx.openHouse;
 	req.setUniverseLock.calibrating = CalCtx.state != CalibrationState::None;
 	req.setUniverseLock.command = CalCtx.lockCommitPending && CalCtx.state == CalibrationState::None ? 1u : 0u;
 

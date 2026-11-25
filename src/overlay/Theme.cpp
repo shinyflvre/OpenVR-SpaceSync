@@ -464,7 +464,7 @@ namespace ui
 		TextWrapped(F.regular, 12.0f, P.textDim, designWidth, text);
 	}
 
-	static bool OptionRow(const char* label, const char* hint, bool isRadio, bool on, float designWidth)
+	static bool OptionRow(const char* label, const char* hint, bool isRadio, bool on, float designWidth, bool enabled = true)
 	{
 		hint = loc::tr(hint);
 		const float box = px(16.0f);
@@ -482,8 +482,12 @@ namespace ui
 		ImGui::PushID(label);
 		ImGui::InvisibleButton("##row", ImVec2(w, h));
 		ImGui::PopID();
-		HoverHand();
-		bool clicked = ImGui::IsItemClicked();
+		bool clicked = false;
+		if (enabled)
+		{
+			HoverHand();
+			clicked = ImGui::IsItemClicked();
+		}
 
 		ImDrawList* dl = ImGui::GetWindowDrawList();
 		float cy = p.y + padY + labelSize.y * 0.5f;
@@ -506,10 +510,15 @@ namespace ui
 		{
 			ImVec2 b0(p.x, cy - box * 0.5f), b1(p.x + box, cy + box * 0.5f);
 			float r = px(3.0f);
-			if (on)
+			if (on && enabled)
 			{
 				dl->AddRectFilled(b0, b1, Col(P.accent), r);
 				DrawIcon(dl, Icon::Check, ImVec2((b0.x + b1.x) * 0.5f, cy), 11.0f, Col(P.textOnAccent), 1.8f);
+			}
+			else if (on)
+			{
+				dl->AddRectFilled(b0, b1, Col(P.checkBorder), r);
+				DrawIcon(dl, Icon::Check, ImVec2((b0.x + b1.x) * 0.5f, cy), 11.0f, Col(P.textDim), 1.8f);
 			}
 			else
 			{
@@ -519,7 +528,7 @@ namespace ui
 		}
 
 		float tx = p.x + box + gap;
-		DrawText(dl, F.regular, 13.0f, ImVec2(tx, p.y + padY), P.text, label);
+		DrawText(dl, F.regular, 13.0f, ImVec2(tx, p.y + padY), enabled ? P.text : P.textDim, label);
 		if (hint && *hint)
 			dl->AddText(F.regular, px(12.0f), ImVec2(tx, p.y + padY + labelSize.y + px(3.0f)), Col(P.textDim), hint, nullptr, px(textW));
 
@@ -527,9 +536,9 @@ namespace ui
 		return clicked;
 	}
 
-	bool CheckboxRow(const char* label, const char* hint, bool* value, float designWidth)
+	bool CheckboxRow(const char* label, const char* hint, bool* value, float designWidth, bool enabled)
 	{
-		bool clicked = OptionRow(label, hint, false, *value, designWidth);
+		bool clicked = OptionRow(label, hint, false, *value, designWidth, enabled);
 		if (clicked)
 			*value = !*value;
 		return clicked;
