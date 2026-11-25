@@ -362,6 +362,89 @@ static bool SDLCALL LiveResizeWatch(void*, SDL_Event* event)
     return true;
 }
 
+#ifdef _WIN32
+// Issue #12: the Vulkan loader injects every *implicit* layer registered on the
+// machine into each Vulkan process -- capture/overlay hooks from Medal, Overwolf,
+// OBS, Twitch, EOS, RivaTuner, ... Some of these are stale and make the loader
+// fail-fast (0xc0000409 inside vulkan-1.dll) during instance creation, which no
+// exception handler can catch. SpaceSync's own window never needs them, so the
+// loader is told to skip implicit layers while the Vulkan instance is created
+// (same effect as launching with VK_LOADER_LAYERS_DISABLE=~implicit~). The
+// variable is restored afterwards so processes SpaceSync spawns, e.g. the
+// -handover relaunch, start from the user's real environment.
+//
+// Opt-out: SPACESYNC_VULKAN_LAYERS=1 keeps implicit layers (e.g. for RenderDoc).
+// A VK_LOADER_LAYERS_DISABLE the user already set is never overridden.
+class ScopedImplicitVulkanLayerFilter
+{
+public:
+    ScopedImplicitVulkanLayerFilter()
+    {
+        if (EnvSet("SPACESYNC_VULKAN_LAYERS"))
+        {
+            lighthouse::Note("vulkan: implicit layers kept (SPACESYNC_VULKAN_LAYERS set)");
+            return;
+        }
+        if (EnvSet("VK_LOADER_LAYERS_DISABLE"))
+        {
+            lighthouse::Note("vulkan: using the user's VK_LOADER_LAYERS_DISABLE");
+            return;
+        }
+        // The loader reads the process environment (GetEnvironmentVariable) when
+        // it scans layers; _putenv_s updates both the CRT and the OS copy.
+        active_ = _putenv_s("VK_LOADER_LAYERS_DISABLE", "~implicit~") == 0;
+        if (active_)
+            lighthouse::Note("vulkan: implicit layers disabled for startup");
+    }
+
+    ~ScopedImplicitVulkanLayerFilter()
+    {
+        if (active_)
+            _putenv_s("VK_LOADER_LAYERS_DISABLE", "");   // empty value removes it
+    }
+
+    ScopedImplicitVulkanLayerFilter(const ScopedImplicitVulkanLayerFilter&) = delete;
+    ScopedImplicitVulkanLayerFilter& operator=(const ScopedImplicitVulkanLayerFilter&) = delete;
+
+private:
+    static bool EnvSet(const char* name)
+    {
+        char buf[8];
+        DWORD n = GetEnvironmentVariableA(name, buf, sizeof buf);
+        return n > 0;
+    }
+
+    bool active_ = false;
+};
+
+// A loader fail-fast kills the process outright, so the only way to tell the
+// user anything is on the next launch: drop a marker before Vulkan init and
+// remove it once init succeeds. A marker that survives means the last start
+// died inside Vulkan.
+static std::string VulkanInitMarkerPath()
+{
+    const char* localAppData = getenv("LOCALAPPDATA");
+    std::string dir = localAppData ? std::string(localAppData) + "\\SpaceSync" : std::string(".");
+    CreateDirectoryA(dir.c_str(), NULL);
+    return dir + "\\vulkan_init.pending";
+}
+
+static void ReportPreviousVulkanCrash(const std::string& marker)
+{
+    if (GetFileAttributesA(marker.c_str()) == INVALID_FILE_ATTRIBUTES)
+        return;
+
+    lighthouse::Note("vulkan: previous launch crashed during graphics (Vulkan) startup");
+    MessageBoxA(NULL,
+        "SpaceSync closed unexpectedly while starting its graphics (Vulkan) the last time it was opened.\n\n"
+        "If SpaceSync doesn't open after this message:\n"
+        "  1. Update your graphics driver (a clean install helps).\n"
+        "  2. Close or uninstall overlay / capture tools (Medal, Overwolf, OBS, RivaTuner, ReShade, ...).\n"
+        "  3. Run \"vulkaninfo --summary\" in a Command Prompt and attach its output to a bug report.",
+        APP_NAME, MB_OK | MB_ICONWARNING);
+}
+#endif
+
 int main(int argc, char** argv)
 {
     HandleCommandLine(argc, argv);
@@ -468,14 +551,32 @@ int main(int argc, char** argv)
     }
 
     g_skipOpenVRVulkanExtensions = g_desktopPreview;
+#ifdef _WIN32
+    const std::string vulkanMarker = VulkanInitMarkerPath();
+    ReportPreviousVulkanCrash(vulkanMarker);
+    if (FILE* marker = fopen(vulkanMarker.c_str(), "w"))
+        fclose(marker);
+#endif
     try {
-        g_vulkanRenderer->Initialize();
-        g_imGuiWindow->Initialize(g_vulkanRenderer, g_overlay, APP_NAME, WIN_WIDTH, WIN_HEIGHT);
+        {
+#ifdef _WIN32
+            ScopedImplicitVulkanLayerFilter layerFilter;
+#endif
+            g_vulkanRenderer->Initialize();
+            g_imGuiWindow->Initialize(g_vulkanRenderer, g_overlay, APP_NAME, WIN_WIDTH, WIN_HEIGHT);
+        }
+#ifdef _WIN32
+        DeleteFileA(vulkanMarker.c_str());
+#endif
         g_imGuiWindow->Show();
         SDL_AddEventWatch(&LiveResizeWatch, nullptr);
     } catch (std::exception& ex) {
 #ifdef _WIN32
-        MessageBoxA(NULL, ex.what(), APP_NAME, MB_OK);
+        // Init failed cleanly (no crash): the message below says why, so don't
+        // also show the "crashed last time" warning on the next launch.
+        DeleteFileA(vulkanMarker.c_str());
+        lighthouse::Note(ex.what());
+        MessageBoxA(NULL, ex.what(), APP_NAME, MB_OK | MB_ICONERROR);
 #else
         printf("%s\n\n", ex.what());
 #endif
