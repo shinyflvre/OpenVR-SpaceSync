@@ -15,6 +15,38 @@
 
 #include <openvr.h>
 
+#include <format>
+#include <stdexcept>
+
+// Vulkan init failures used to print to a stderr nobody sees (WIN32 subsystem)
+// and carry on with null handles, crashing later somewhere less obvious. Throw
+// instead so main() can show the user which step failed.
+static auto ThrowIfVkFailed(VkResult result, const char* step) -> void
+{
+    if (result == VK_SUCCESS || result == VK_INCOMPLETE)
+        return;
+
+    const char* name = "unknown error";
+    switch (result) {
+    case VK_ERROR_OUT_OF_HOST_MEMORY:    name = "VK_ERROR_OUT_OF_HOST_MEMORY"; break;
+    case VK_ERROR_OUT_OF_DEVICE_MEMORY:  name = "VK_ERROR_OUT_OF_DEVICE_MEMORY"; break;
+    case VK_ERROR_INITIALIZATION_FAILED: name = "VK_ERROR_INITIALIZATION_FAILED"; break;
+    case VK_ERROR_DEVICE_LOST:           name = "VK_ERROR_DEVICE_LOST"; break;
+    case VK_ERROR_LAYER_NOT_PRESENT:     name = "VK_ERROR_LAYER_NOT_PRESENT"; break;
+    case VK_ERROR_EXTENSION_NOT_PRESENT: name = "VK_ERROR_EXTENSION_NOT_PRESENT"; break;
+    case VK_ERROR_FEATURE_NOT_PRESENT:   name = "VK_ERROR_FEATURE_NOT_PRESENT"; break;
+    case VK_ERROR_INCOMPATIBLE_DRIVER:   name = "VK_ERROR_INCOMPATIBLE_DRIVER"; break;
+    default: break;
+    }
+
+    throw std::runtime_error(std::format(
+        "Vulkan could not be started ({} failed: {} / {}).\n\n"
+        "Update your graphics driver (a clean install helps), and close or disable "
+        "overlay / capture tools such as Medal, Overwolf, OBS, RivaTuner or ReShade, "
+        "then try again.",
+        step, name, (int)result));
+}
+
 VulkanRenderer::VulkanRenderer()
 {
     vulkan_instance_ = VK_NULL_HANDLE;
@@ -74,7 +106,7 @@ auto VulkanRenderer::Initialize()  -> void
 #endif
 
     vk_result = vkCreateInstance(&instance_create_info, vulkan_allocator_, &vulkan_instance_);
-    VK_VALIDATE_RESULT(vk_result);
+    ThrowIfVkFailed(vk_result, "vkCreateInstance");
 
 #ifdef ENABLE_VULKAN_VALIDATION
     auto DebugReport = [](VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT objectType, uint64_t object, size_t location, int32_t messageCode, const char* pLayerPrefix, const char* pMessage, void* pUserData) -> VkBool32
@@ -105,14 +137,14 @@ auto VulkanRenderer::Initialize()  -> void
 
     uint32_t device_count = {};
     vk_result = vkEnumeratePhysicalDevices(vulkan_instance_, &device_count, nullptr);
-    VK_VALIDATE_RESULT(vk_result);
+    ThrowIfVkFailed(vk_result, "vkEnumeratePhysicalDevices");
 
     if (device_count == 0)
         throw std::runtime_error("You need an GPU to run this program, make sure your drivers are up to date!");
 
     device_list_.resize(device_count);
     vk_result = vkEnumeratePhysicalDevices(vulkan_instance_, &device_count, device_list_.data());
-    VK_VALIDATE_RESULT(vk_result);
+    ThrowIfVkFailed(vk_result, "vkEnumeratePhysicalDevices");
 
     for (VkPhysicalDevice& device : device_list_)
     {
@@ -129,6 +161,10 @@ auto VulkanRenderer::Initialize()  -> void
             break;
         }
     }
+
+    // Only CPU / "other" devices (e.g. a software rasterizer) were listed.
+    if (vulkan_physical_device_ == VK_NULL_HANDLE)
+        throw std::runtime_error("You need an GPU to run this program, make sure your drivers are up to date!");
 
     VkPhysicalDeviceProperties vulkan_physical_device_properties = {};
     vkGetPhysicalDeviceProperties(vulkan_physical_device_, &vulkan_physical_device_properties);
@@ -163,7 +199,8 @@ auto VulkanRenderer::Initialize()  -> void
     }
 
     queues_properties.clear();
-    assert(vulkan_queue_family_ != (uint32_t)-1);
+    if (vulkan_queue_family_ == (uint32_t)-1)
+        throw std::runtime_error("Your graphics card has no Vulkan graphics queue, make sure your drivers are up to date!");
 
     auto get_device_extensions = [&](const std::vector<std::string>& extensions) -> std::vector<const char*> {
         std::vector<const char*> result = {};
@@ -175,7 +212,7 @@ auto VulkanRenderer::Initialize()  -> void
     vulkan_device_extensions_ = GetVulkanDeviceExtensionsRequiredByOpenVR(vulkan_physical_device_);
 
     if (!IsVulkanDeviceExtensionAvailable(vulkan_physical_device_, VK_KHR_SWAPCHAIN_EXTENSION_NAME))
-        std::exit(EXIT_FAILURE);
+        throw std::runtime_error("Your graphics driver does not support Vulkan swapchains (VK_KHR_swapchain), make sure your drivers are up to date!");
 
     vulkan_device_extensions_.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
 
@@ -227,7 +264,7 @@ auto VulkanRenderer::Initialize()  -> void
     };
 
     vk_result = vkCreateDevice(vulkan_physical_device_, &device_create_info, vulkan_allocator_, &vulkan_device_);
-    VK_VALIDATE_RESULT(vk_result);
+    ThrowIfVkFailed(vk_result, "vkCreateDevice");
 
     vkGetDeviceQueue(vulkan_device_, vulkan_queue_family_, 0, &vulkan_queue_);
 
